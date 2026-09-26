@@ -107,6 +107,20 @@ assert(
 );
 
 assert(
+  backgroundSource.includes('function expeditionRewardClaimForm') &&
+  backgroundSource.includes('function expeditionRewardsRecovered') &&
+  backgroundSource.includes("expectedKind: 'expedition_claim'") &&
+  backgroundSource.includes('async function verifyBackgroundExpeditionClaim'),
+  'background result handling must claim and verify expedition rewards before relaunch'
+);
+
+assert(
+  backgroundSource.includes("redirectedToIndex") &&
+  backgroundSource.includes("result_marked_recovered"),
+  'reward claim verification must accept both result confirmation and redirect to expedition index'
+);
+
+assert(
   backgroundSource.includes("['due', 'ready_to_start', 'preparing', 'starting']") &&
   backgroundSource.includes("backgroundObserveExpeditions({\n        force: true"),
   'actionable expedition phases must trigger immediate silent background handling in the same cycle'
@@ -141,5 +155,6 @@ console.log('Panel active mission precedence: OK');
 console.log('Fresh-route navigation suppression + fallback: OK');
 console.log('Background POST actions without page changes: OK');
 console.log('Silent expedition launch verification/retry: OK');
+console.log('Background expedition reward claim + verification: OK');
 console.log('Visible expedition redirect suppression: OK');
 console.log('Panel action log page: OK');
