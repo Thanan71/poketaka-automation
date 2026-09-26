@@ -2,7 +2,7 @@
 (() => {
   'use strict';
 
-  const VERSION = "0.9.3";
+  const VERSION = "0.9.4";
 
 // ---- src/core/config.js ----
 const STORAGE_KEY = 'poketaka-automation:config';
@@ -2956,9 +2956,11 @@ function setPokemonProgression(patch = {}) {
 
 function pokemonNumber(value) {
   if (value == null) return null;
-  const match = String(value).replace(/ /g, ' ').match(/-?d[ds]*(?:[.,]d+)?/);
+  const match = String(value)
+    .replace(/\u00a0/g, ' ')
+    .match(/-?\d[\d\s]*(?:[.,]\d+)?/);
   if (!match) return null;
-  const parsed = Number(match[0].replace(/s/g, '').replace(',', '.'));
+  const parsed = Number(match[0].replace(/\s/g, '').replace(',', '.'));
   return Number.isFinite(parsed) ? parsed : null;
 }
 
@@ -3226,15 +3228,32 @@ function resetPokemonProgressionScan() {
   });
 }
 
-function pokemonProgressionScanDue() {
+function expeditionHasPriorityOverPokemonProgression() {
+  return [
+    'running',
+    'due',
+    'result',
+    'claiming',
+    'opening_result',
+    'ready_to_start',
+    'preparing',
+    'starting',
+  ].includes(expeditionCycle().phase);
+}
+
+function pokemonProgressionScanDue({ allowExpeditionFallback = false } = {}) {
   if (!config.autoLevelPokemon && !config.autoEvolvePokemon) return false;
 
   const progress = pokemonProgressionState();
   if (progress.blockedUntil && progress.blockedUntil > now()) return false;
 
-  // Une expédition active utilise généralement les Pokémon les plus utiles.
-  // On attend son retour au lieu de renforcer des remplaçants moins pertinents.
-  if (expeditionCycle().phase === 'running') {
+  // Une expédition à résoudre ou à relancer est toujours prioritaire.
+  // La progression Pokémon n'est autorisée en fallback que si une tentative
+  // d'expédition a explicitement échoué faute d'équipe viable.
+  if (
+    !allowExpeditionFallback &&
+    expeditionHasPriorityOverPokemonProgression()
+  ) {
     return false;
   }
 
@@ -3385,9 +3404,19 @@ async function handlePokemonProfileProgression() {
           action: 'evolve_failed',
           reason: httpTransportState().lastError || 'Évolution HTTP non soumise',
         });
+        return false;
       }
 
-      return submitted;
+      markPokemonScanned(context.id, {
+        phase: 'scanned',
+        targetId: context.id,
+        targetName: context.name,
+        targetLevel: context.level,
+        action: 'evolve_done',
+        reason: `Évolution effectuée vers ${evolution.target || 'la forme suivante'} · priorité rendue aux expéditions`,
+        lastEvolutionAt: now(),
+      });
+      return true;
     }
 
     const dialog = document.querySelector('#pokemon-evolution-dialog');
@@ -3496,9 +3525,19 @@ async function handlePokemonProfileProgression() {
           action: 'level_up_failed',
           reason: httpTransportState().lastError || 'Renforcement HTTP non soumis',
         });
+        return false;
       }
 
-      return submitted;
+      markPokemonScanned(context.id, {
+        phase: 'scanned',
+        targetId: context.id,
+        targetName: context.name,
+        targetLevel: level.targetLevel,
+        action: 'level_up_done',
+        reason: `Renforcement vers le niveau ${level.targetLevel} effectué · priorité rendue aux expéditions`,
+        lastUpgradeAt: now(),
+      });
+      return true;
     }
 
     const dialog = document.querySelector('#pokemon-level-dialog');
@@ -3567,14 +3606,19 @@ async function handlePokemonProfileProgression() {
     : clickElement(back, `Progression Pokémon: ${context.name} analysé`);
 }
 
-async function handlePokemonProgression() {
+async function handlePokemonProgression({ allowExpeditionFallback = false } = {}) {
   if (!config.autoLevelPokemon && !config.autoEvolvePokemon) return false;
 
-  if (expeditionCycle().phase === 'running') {
+  if (
+    !allowExpeditionFallback &&
+    expeditionHasPriorityOverPokemonProgression()
+  ) {
     setPokemonProgression({
       phase: 'waiting_expedition',
       action: 'wait',
-      reason: `Attente de la fin de ${expeditionCycle().title || 'l’expédition'} avant d’investir des ressources`,
+      reason: expeditionCycle().phase === 'running'
+        ? `Attente de la fin de ${expeditionCycle().title || 'l’expédition'} avant d’investir des ressources`
+        : 'Priorité au cycle d’expédition avant tout investissement Pokémon',
     });
     return false;
   }
@@ -5488,13 +5532,18 @@ function backgroundEvolutionCandyGoal(evolutions) {
   };
 }
 
-async function backgroundHandlePokemonProgression() {
+async function backgroundHandlePokemonProgression({ allowExpeditionFallback = false } = {}) {
   if (!config.autoLevelPokemon && !config.autoEvolvePokemon) return false;
-  if (expeditionCycle().phase === 'running') {
+  if (
+    !allowExpeditionFallback &&
+    expeditionHasPriorityOverPokemonProgression()
+  ) {
     setPokemonProgression({
       phase: 'waiting_expedition',
       action: 'wait',
-      reason: `Attente de la fin de ${expeditionCycle().title || 'l’expédition'} avant d’investir des ressources`,
+      reason: expeditionCycle().phase === 'running'
+        ? `Attente de la fin de ${expeditionCycle().title || 'l’expédition'} avant d’investir des ressources`
+        : 'Priorité au prochain cycle d’expédition avant tout investissement Pokémon',
     });
     return false;
   }
@@ -5592,7 +5641,18 @@ async function backgroundHandlePokemonProgression() {
         }
       );
 
-      if (submitted) return true;
+      if (submitted) {
+        markPokemonScanned(context.id, {
+          phase: 'scanned',
+          targetId: context.id,
+          targetName: context.name,
+          targetLevel: context.level,
+          action: 'evolve_done',
+          reason: `Évolution effectuée vers ${evolution.target || 'la forme suivante'} · priorité rendue aux expéditions`,
+          lastEvolutionAt: now(),
+        });
+        return true;
+      }
       continue;
     }
 
@@ -5636,7 +5696,18 @@ async function backgroundHandlePokemonProgression() {
         }
       );
 
-      if (submitted) return true;
+      if (submitted) {
+        markPokemonScanned(context.id, {
+          phase: 'scanned',
+          targetId: context.id,
+          targetName: context.name,
+          targetLevel: level.targetLevel,
+          action: 'level_up_done',
+          reason: `Renforcement vers le niveau ${level.targetLevel} effectué · priorité rendue aux expéditions`,
+          lastUpgradeAt: now(),
+        });
+        return true;
+      }
       continue;
     }
 
@@ -5719,8 +5790,17 @@ async function runBackgroundAutomation() {
     if (gymAction) return true;
   }
 
-  if (pokemonProgressionScanDue()) {
-    const pokemonAction = await backgroundHandlePokemonProgression();
+  const expeditionNeedsTeamHelp =
+    !expeditionObservation.active &&
+    state.expeditionPlan?.viability === 'blocked';
+
+  if (
+    expeditionNeedsTeamHelp &&
+    pokemonProgressionScanDue({ allowExpeditionFallback: true })
+  ) {
+    const pokemonAction = await backgroundHandlePokemonProgression({
+      allowExpeditionFallback: true,
+    });
     if (pokemonAction) return true;
   }
 
@@ -6291,13 +6371,25 @@ function moduleEnabled(moduleId) {
       });
     }
 
+    const pokemonFallbackNeeded =
+      state.expeditionPlan?.viability === 'blocked';
+
     if (
       (config.autoLevelPokemon || config.autoEvolvePokemon) &&
       (isCollectionIndexPage() || isPokemonProfilePage()) &&
       (
-        pokemonProgressionScanDue() ||
-        ['scanning', 'opening_profile', 'level_ready', 'evolution_ready', 'scanned', 'blocked', 'manual'].includes(
-          pokemonProgressionState().phase
+        !expeditionHasPriorityOverPokemonProgression() ||
+        pokemonFallbackNeeded
+      ) &&
+      (
+        pokemonProgressionScanDue({
+          allowExpeditionFallback: pokemonFallbackNeeded,
+        }) ||
+        (
+          pokemonFallbackNeeded &&
+          ['scanning', 'opening_profile', 'level_ready', 'evolution_ready', 'scanned', 'blocked', 'manual'].includes(
+            pokemonProgressionState().phase
+          )
         )
       )
     ) {
@@ -6305,7 +6397,9 @@ function moduleEnabled(moduleId) {
         name: 'pokemon-progression',
         priority: 6750,
         reason: pokemonProgressionState().reason || 'progression Pokémon intelligente',
-        run: handlePokemonProgression,
+        run: () => handlePokemonProgression({
+          allowExpeditionFallback: pokemonFallbackNeeded,
+        }),
       });
     }
 
