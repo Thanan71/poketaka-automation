@@ -1013,9 +1013,10 @@ GM_addStyle(`
       'autoProgression',
       'autoPlant',
     ];
-    const intelligenceKeys = ['smartTeam', 'smartCapture'];
+    const intelligenceKeys = ['smartTeam'];
     const captureKeys = [
       'autoCapture',
+      'smartCapture',
       'captureNewSpecies',
       'captureRare',
       'captureUnknownEncounters',
@@ -1047,14 +1048,31 @@ GM_addStyle(`
       .map(label => chipHtml(label))
       .join('');
 
-    const captureLabel = state.captureDecision?.species
-      ? `${state.captureDecision.species} · ${state.captureDecision.action}`
+    const captureView = liveCapturePanelState();
+    const captureMeta = captureActionMeta(captureView.action);
+    const captureLabel = captureView.species
+      ? `${captureView.species} · ${captureMeta.label}`
       : 'Aucune décision';
-    const captureTone = state.captureDecision?.action === 'capture'
-      ? 'ready'
-      : state.captureDecision?.action === 'manual'
-        ? 'danger'
-        : '';
+    const captureTone = captureMeta.tone === 'neutral' ? '' : captureMeta.tone;
+    const captureSpeciesStatus = captureView.isNew === true
+      ? 'Nouvelle espèce'
+      : captureView.isNew === false
+        ? 'Déjà au Pokédex'
+        : 'Statut inconnu';
+    const captureBallLabel = captureView.ballName
+      ? `${captureView.ballName}${captureView.ballReserve != null ? ` ×${captureView.ballReserve}` : ''}`
+      : captureView.ballReserve != null
+        ? `Balls ×${captureView.ballReserve}`
+        : '—';
+    const captureChanceLabel = captureView.captureChance != null
+      ? `${captureView.captureChance}%`
+      : '—';
+    const captureAttemptsLabel = captureView.attemptsRemaining != null
+      ? String(captureView.attemptsRemaining)
+      : '—';
+    const captureProgress = captureView.captureChance != null
+      ? Math.max(0, Math.min(100, captureView.captureChance))
+      : 0;
 
     panel.dataset.collapsed = String(Boolean(config.panelCollapsed));
     panel.innerHTML = `
@@ -1156,6 +1174,53 @@ GM_addStyle(`
           ` : ''}
         </section>
 
+        ${captureView.active ? `
+          <section class="pta-capture-card" data-tone="${captureTone || 'neutral'}" aria-label="Décision de capture">
+            <div class="pta-capture-head">
+              <div>
+                <div class="pta-eyebrow">Rencontre sauvage</div>
+                <div class="pta-capture-title" title="${escapeHtml(captureView.species || '')}">
+                  ${escapeHtml(captureView.species || 'Pokémon rencontré')}
+                </div>
+                <div class="pta-capture-subtitle">${escapeHtml(captureSpeciesStatus)}</div>
+              </div>
+              <span class="pta-badge ${captureMeta.tone}">${escapeHtml(captureMeta.label)}</span>
+            </div>
+
+            <div class="pta-capture-grid">
+              <div class="pta-capture-stat">
+                <div class="pta-label">Chance</div>
+                <strong>${escapeHtml(captureChanceLabel)}</strong>
+              </div>
+              <div class="pta-capture-stat">
+                <div class="pta-label">Ball</div>
+                <strong title="${escapeHtml(captureBallLabel)}">${escapeHtml(captureBallLabel)}</strong>
+              </div>
+              <div class="pta-capture-stat">
+                <div class="pta-label">Tentatives</div>
+                <strong>${escapeHtml(captureAttemptsLabel)}</strong>
+              </div>
+            </div>
+
+            ${captureView.captureChance != null ? `
+              <div class="pta-capture-progress" title="Chance de capture ${escapeHtml(captureChanceLabel)}">
+                <span style="width: ${captureProgress}%"></span>
+              </div>
+            ` : ''}
+
+            <div class="pta-capture-reason">
+              <strong>${escapeHtml(captureModeLabel())}</strong> ·
+              ${escapeHtml(captureView.reason || 'Aucune raison disponible')}
+            </div>
+
+            <div class="pta-chip-row">
+              ${captureView.rarity ? chipHtml(`Rareté · ${captureView.rarity}`) : ''}
+              ${captureView.ivScore != null ? chipHtml(`IV · ${captureView.ivScore}`) : ''}
+              ${captureView.ballReserve != null ? chipHtml(`Réserve min · ${config.minBallReserve}`) : ''}
+            </div>
+          </section>
+        ` : ''}
+
         <div class="pta-actions">
           <button class="pta-action-btn primary" data-action="run">▶ Exécuter un cycle</button>
           <button class="pta-action-btn" data-action="ranking">☷ Classement</button>
@@ -1196,7 +1261,7 @@ GM_addStyle(`
             <div class="pta-module">
               <span class="pta-mini-dot ${captureTone}"></span>
               <span class="pta-module-name">Capture</span>
-              <span class="pta-module-status" title="${escapeHtml(state.captureDecision?.reason || '')}">
+              <span class="pta-module-status" title="${escapeHtml(captureView.reason || '')}">
                 ${escapeHtml(captureLabel)}
               </span>
             </div>
@@ -1240,7 +1305,6 @@ GM_addStyle(`
           </summary>
           <div class="pta-settings">
             ${optionButton('smartTeam', 'Équipe intelligente')}
-            ${optionButton('smartCapture', 'Capture intelligente')}
           </div>
         </details>
 
@@ -1252,10 +1316,39 @@ GM_addStyle(`
             </span>
           </summary>
           <div class="pta-settings">
-            ${optionButton('autoCapture', 'Captures auto')}
+            <div class="pta-settings-note">
+              <strong>Capture auto</strong> autorise le bot à lancer une Ball.
+              <strong>Capture intelligente</strong> applique ensuite les critères ci-dessous.
+            </div>
+            ${optionButton('autoCapture', 'Capture auto')}
+            ${optionButton('smartCapture', 'Capture intelligente')}
             ${optionButton('captureNewSpecies', 'Nouvelles espèces')}
             ${optionButton('captureRare', 'Rares')}
-            ${optionButton('captureUnknownEncounters', 'Captures inconnues')}
+            ${optionButton('captureUnknownEncounters', 'Inconnues')}
+
+            <div class="pta-stepper">
+              <div class="pta-stepper-label">
+                Réserve minimale
+                <small>Ne pas consommer les dernières Balls</small>
+              </div>
+              <div class="pta-stepper-value">${config.minBallReserve}</div>
+              <div class="pta-stepper-controls">
+                <button class="pta-stepper-btn" data-action="capture-reserve-dec" title="Réduire la réserve">−</button>
+                <button class="pta-stepper-btn" data-action="capture-reserve-inc" title="Augmenter la réserve">+</button>
+              </div>
+            </div>
+
+            <div class="pta-stepper">
+              <div class="pta-stepper-label">
+                IV minimum
+                <small>Critère utilisé si les IV sont visibles</small>
+              </div>
+              <div class="pta-stepper-value">${config.minCaptureIvScore}</div>
+              <div class="pta-stepper-controls">
+                <button class="pta-stepper-btn" data-action="capture-iv-dec" title="Réduire le seuil IV">−</button>
+                <button class="pta-stepper-btn" data-action="capture-iv-inc" title="Augmenter le seuil IV">+</button>
+              </div>
+            </div>
           </div>
         </details>
 
