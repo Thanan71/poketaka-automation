@@ -477,10 +477,8 @@
         return false;
       }
 
-      if (['preparing', 'starting'].includes(cycleState.phase)) {
-        return handleExpeditionPreparation();
-      }
-
+      state.selectedExpedition = null;
+      state.selectedExpeditionScore = null;
       setExpeditionPhase('ready_to_start', {
         title: null,
         resultUrl: null,
