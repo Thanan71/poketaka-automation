@@ -508,9 +508,9 @@ GM_addStyle(`
             </div>
             <div class="pta-module">
               <span class="pta-mini-dot"></span>
-              <span class="pta-module-name">Équipe</span>
+              <span class="pta-module-name">Équipe prévue</span>
               <span class="pta-module-status">
-                ${escapeHtml((state.smartTeam?.lastSelection || []).slice(-3).join(', ') || '—')}
+                ${escapeHtml((state.expeditionPlan?.team || state.smartTeam?.lastSelection || []).slice(-3).join(', ') || '—')}
               </span>
             </div>
             <div class="pta-module">
@@ -547,7 +547,7 @@ GM_addStyle(`
           </div>
         </details>
 
-        <div class="pta-footer">Orchestrateur v0.7 · équipe intelligente · captures prudentes · actions destructrices bloquées</div>
+        <div class="pta-footer">Smart Expedition v0.8 · mission + équipe · captures prudentes · actions destructrices bloquées</div>
       </div>
     `;
   }
