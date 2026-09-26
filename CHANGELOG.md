@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.9.8 - 2026-09-26
+
+- Correction de la capture intelligente qui pouvait encore capturer un Pokémon déjà possédé si celui-ci était rare ou dépassait le seuil d'IV.
+- Le statut `isNew === false` devient désormais un veto prioritaire avant les règles Rare/IV.
+- Ajout du réglage `captureOwnedDuplicates`, désactivé par défaut.
+- Nouveau toggle panel : `Autoriser doublons rares / IV`.
+- La capture simple reste volontairement exhaustive ; le veto doublon s'applique à la capture intelligente.
+- Détection du statut Pokédex renforcée pour les libellés "Absente du Pokédex", "Présente dans le Pokédex", "Déjà au Pokédex", etc.
+- La capture visible et la capture silencieuse utilisent désormais la même fonction de décision afin d'éviter toute divergence.
+- Les doublons ignorés et décisions manuelles sont inscrits dans l'onglet Logs.
+- Ajout de tests CI couvrant doublon rare, doublon IV élevé, nouvelle espèce, opt-in doublons et parsing du statut Pokédex.
+
+
 ## 0.9.7 - 2026-09-26
 
 - Correction de la redirection visible vers la page Expéditions lors d'un relancement alors que le mode GET silencieux est actif.
