@@ -8,6 +8,7 @@ const catalogSource = fs.readFileSync('src/features/expeditions/catalog.js', 'ut
 const pokemonSource = fs.readFileSync('src/features/pokemon/progression.js', 'utf8');
 const panelSource = fs.readFileSync('src/ui/panel.js', 'utf8');
 const stateSource = fs.readFileSync('src/core/state.js', 'utf8');
+const domSource = fs.readFileSync('src/core/dom.js', 'utf8');
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -146,6 +147,13 @@ assert(
   'action log must persist and stay bounded'
 );
 
+assert(
+  domSource.includes("function isBotUiElement(el)") &&
+  domSource.includes(".filter(el => !isBotUiElement(el))") &&
+  domSource.includes("isBotUiElement(el) || isUnsafe(el)"),
+  'DOM automation must never target controls inside the PokéTaka Automation panel'
+);
+
 console.log('Background GET whitelist: OK');
 console.log('Detached HTML parsing: OK');
 console.log('Expedition/league/collection background observation: OK');
@@ -158,3 +166,4 @@ console.log('Silent expedition launch verification/retry: OK');
 console.log('Background expedition reward claim + verification: OK');
 console.log('Visible expedition redirect suppression: OK');
 console.log('Panel action log page: OK');
+console.log('Bot panel excluded from automated DOM actions: OK');
