@@ -310,6 +310,50 @@ GM_addStyle(`
     #pta-panel .pta-badge.danger { background: var(--pta-red-soft); color: #fecaca; }
     #pta-panel .pta-badge.neutral { background: rgba(148,163,184,.10); color: #cbd5e1; }
 
+    #pta-panel .pta-goal-card {
+      margin-top: 9px;
+      padding: 12px;
+      border: 1px solid rgba(96,165,250,.22);
+      border-radius: 14px;
+      background: linear-gradient(145deg, rgba(96,165,250,.10), rgba(255,255,255,.025));
+    }
+    #pta-panel .pta-goal-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 9px;
+    }
+    #pta-panel .pta-goal-title {
+      margin-top: 3px;
+      font-size: 13px;
+      font-weight: 820;
+      letter-spacing: -.012em;
+    }
+    #pta-panel .pta-goal-reason {
+      margin-top: 4px;
+      color: var(--pta-muted);
+      font-size: 10px;
+      line-height: 1.45;
+    }
+    #pta-panel .pta-goal-step {
+      margin-top: 9px;
+      padding: 9px 10px;
+      border-radius: 10px;
+      background: rgba(96,165,250,.075);
+      border: 1px solid rgba(96,165,250,.14);
+    }
+    #pta-panel .pta-goal-step strong {
+      display: block;
+      font-size: 11px;
+    }
+    #pta-panel .pta-goal-step small {
+      display: block;
+      margin-top: 2px;
+      color: var(--pta-muted);
+      font-size: 9px;
+      line-height: 1.4;
+    }
+
     #pta-panel .pta-capture-card {
       margin-top: 9px;
       padding: 11px;
@@ -1046,6 +1090,23 @@ GM_addStyle(`
     const next = nextDueModule();
     const cycleMeta = expeditionPhaseMeta(expeditionCycle().phase);
     const decision = panelNextDecision();
+    const account = accountSnapshot();
+    const goal = currentGoalPlan();
+    const goalConfidenceLabel = {
+      high: 'Confiance élevée',
+      medium: 'Confiance moyenne',
+      low: 'Confiance faible',
+    }[goal.confidence] || 'Planner';
+    const goalConfidenceTone = goal.confidence === 'high'
+      ? 'ready'
+      : goal.confidence === 'low'
+        ? 'wait'
+        : 'current';
+    const goalAccountChips = [
+      account.trainer?.level != null ? `Niv. dresseur · ${account.trainer.level}` : null,
+      account.pokedex?.capturedSpecies != null ? `Espèces · ${account.pokedex.capturedSpecies}` : null,
+      account.league?.badges != null ? `Badges · ${account.league.badges}/${account.league.totalBadges || 8}` : null,
+    ].filter(Boolean);
     const team = plannedTeamNames();
     const activeModules = MODULES.filter(module => moduleEnabled(module.id));
     const rosterCount = state.rosterSnapshot?.pokemon?.length || 0;
@@ -1071,6 +1132,7 @@ GM_addStyle(`
       opening_prepare: 'Ouverture',
       preparing: 'Préparation',
       challenging: 'Combat',
+      result: 'Résultat',
       blocked: 'Bloqué',
       done: 'Terminé',
     };
@@ -1240,6 +1302,42 @@ GM_addStyle(`
           </div>
         </div>
 
+        <section class="pta-goal-card" aria-label="Objectif global">
+          <div class="pta-goal-head">
+            <div>
+              <div class="pta-eyebrow">Objectif global · ${escapeHtml(goal.strategy || 'progression')}</div>
+              <div class="pta-goal-title" title="${escapeHtml(goal.primary?.title || '')}">
+                ${escapeHtml(goal.primary?.title || 'Observer le compte')}
+              </div>
+            </div>
+            <span class="pta-badge ${goalConfidenceTone}">
+              ${escapeHtml(goalConfidenceLabel)}
+            </span>
+          </div>
+
+          <div class="pta-goal-reason">
+            ${escapeHtml(goal.primary?.reason || 'Le planner construit la prochaine stratégie.')}
+          </div>
+
+          <div class="pta-goal-step">
+            <div class="pta-eyebrow">Étape suivante</div>
+            <strong>${escapeHtml(goal.step?.title || 'Collecter l’état du compte')}</strong>
+            <small>${escapeHtml(goal.step?.reason || '')}</small>
+          </div>
+
+          ${goalAccountChips.length ? `
+            <div class="pta-chip-row">
+              ${goalAccountChips.map(label => chipHtml(label)).join('')}
+            </div>
+          ` : ''}
+
+          ${Array.isArray(goal.blockers) && goal.blockers.length ? `
+            <div class="pta-chip-row">
+              ${goal.blockers.map(blocker => chipHtml(`Blocage · ${blocker}`, blocker)).join('')}
+            </div>
+          ` : ''}
+        </section>
+
         <section class="pta-mission" aria-label="Plan d’expédition">
           <div class="pta-mission-head">
             <div class="pta-mission-name" title="${escapeHtml(missionTitle)}">
@@ -1361,6 +1459,13 @@ GM_addStyle(`
           </summary>
           <div class="pta-modules">
             <div class="pta-module">
+              <span class="pta-mini-dot ${goalConfidenceTone}"></span>
+              <span class="pta-module-name">Goal Planner</span>
+              <span class="pta-module-status" title="${escapeHtml(goal.step?.reason || '')}">
+                ${escapeHtml(goal.step?.title || 'Observation')}
+              </span>
+            </div>
+            <div class="pta-module">
               <span class="pta-mini-dot current"></span>
               <span class="pta-module-name">Orchestrateur</span>
               <span class="pta-module-status" title="${escapeHtml(state.orchestrator?.lastReason || '')}">
@@ -1480,7 +1585,7 @@ GM_addStyle(`
         </details>
 
         <div class="pta-footer">
-          Smart Expedition · GitHub Raw · actions destructrices bloquées
+          Goal Planner v0.9 · GitHub Raw · actions destructrices bloquées
         </div>
       </div>
     `;
