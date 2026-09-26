@@ -11,6 +11,7 @@ La logique métier ne doit plus y être ajoutée.
 - `src/features/expeditions/team.js` — snapshot du roster, efficacité des types, viabilité et composition d'équipe.
 - `src/features/expeditions/capture.js` — détection des rencontres, contexte de capture, décisions et exécution.
 - `src/features/expeditions/cycle.js` — machine d'état expédition et résultats.
+- `src/features/league/gyms.js` — vérification quotidienne de la Ligue, arène disponible, composition d'équipe et défi automatique.
 - `src/features/expeditions/catalog.js` — catalogue, scoring mission + équipe et stratégie de choix.
 - `src/features/activities.js` — soins, serre, incubateur et pension.
 - `src/core/navigation.js` — timers, navigation intelligente, orchestrateur et scheduler.
