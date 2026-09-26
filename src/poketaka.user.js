@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PokéTaka Automation
 // @namespace    https://github.com/Thanan71/poketaka-automation
-// @version      0.7.0
+// @version      0.7.1
 // @description  Assistant d'automatisation DOM pour PokéTaka : expéditions, récompenses, soins, serre et progression.
 // @author       Thanan71
 // @match        https://poketaka.fr/*
@@ -16,7 +16,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.7.0';
+  const VERSION = '0.7.1';
   const STORAGE_KEY = 'poketaka-automation:config';
   const STATE_KEY = 'poketaka-automation:state';
 
@@ -1359,7 +1359,10 @@
     );
 
     const pageContext = {
-      teamLevel: parseTeamLevel(pageText),
+      // Le catalogue n'expose pas le niveau réel de l'équipe disponible.
+      // Ne jamais le déduire du texte des missions : "Niveau conseillé"
+      // appartient à la destination, pas à l'équipe du joueur.
+      teamLevel: null,
       resources: parseAvailableResources(pageText),
       historyTitles,
     };
@@ -1411,10 +1414,7 @@
     // parmi celles qui restent dans le seuil de réussite configuré.
     if (config.strategy === 'progression') {
       const viableProgression = ranking
-        .filter(item =>
-          item.failureStreak < 2 &&
-          (item.requiredLevel == null || item.teamLevel == null || item.teamLevel >= item.requiredLevel)
-        )
+        .filter(item => item.failureStreak < 2)
         .sort((a, b) => {
           if (a.index !== b.index) return b.index - a.index;
           if (a.progressionRank !== b.progressionRank) return b.progressionRank - a.progressionRank;
