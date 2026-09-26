@@ -216,6 +216,7 @@ function directActionKind(urlLike) {
   const path = url.pathname;
   const routes = [
     ['capture', /^\/expeditions\/encounters\/[^/]+\/capture\/?$/],
+    ['expedition_claim', /^\/expeditions\/results\/[^/]+\/claim\/?$/],
     ['expedition_launch', /^\/expeditions\/[^/]+\/launch\/?$/],
     ['gym_challenge', /^\/gyms\/[^/]+\/challenge\/?$/],
     ['pokemon_level_up', /^\/collection\/[^/]+\/level-up\/?$/],
