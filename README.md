@@ -284,3 +284,24 @@ Le bot peut maintenant renforcer et faire évoluer les Pokémon de manière prud
 - Un Pokémon déjà engagé dans une activité est ignoré.
 
 Les réglages sont accessibles dans la section **Progression Pokémon** du panel.
+
+
+## Requêtes HTTP directes
+
+PokéTaka Automation peut maintenant exécuter plusieurs actions sans simuler de clics.
+
+Quand PokéTaka expose une action sous forme de formulaire, le bot peut soumettre directement ce formulaire en réutilisant :
+
+- l'URL `action` réellement affichée ;
+- le token CSRF `_token` ;
+- la clé `idempotency_key` ;
+- les champs déjà présents dans la page ;
+- la session same-origin du navigateur.
+
+Ce mode couvre actuellement la capture, le lancement d'expédition, les défis d'Arène, le renforcement et les évolutions.
+
+Pour les équipes, le bot envoie directement les IDs de l'équipe calculée via `pokemon_public_ids[]`, sans remplir visuellement chaque slot.
+
+Le mode est activé par défaut avec **Requêtes HTTP directes** dans le panel. S'il est désactivé, le bot revient au comportement DOM historique.
+
+Le transport ne cherche pas d'API cachée et n'invente pas de routes : seules les routes observées dans les formulaires PokéTaka et explicitement autorisées sont utilisables.
