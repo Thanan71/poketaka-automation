@@ -36,6 +36,7 @@ const STORAGE_KEY = 'poketaka-automation:config';
     smartCapture: true,
     captureNewSpecies: true,
     captureRare: true,
+    captureOwnedDuplicates: false,
     captureUnknownEncounters: false,
     minCaptureIvScore: 80,
     minBallReserve: 3,
