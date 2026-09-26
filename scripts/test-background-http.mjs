@@ -43,9 +43,13 @@ assert(
 );
 
 assert(
-  navigationSource.includes("module.id === 'progression' || module.id === 'pokemon'") &&
+  navigationSource.includes("module.id === 'progression'") &&
+  navigationSource.includes("backgroundRouteFresh('/league')") &&
+  navigationSource.includes("module.id === 'pokemon'") &&
+  navigationSource.includes("backgroundRouteFresh('/collection')") &&
+  navigationSource.includes("backgroundRouteFresh('/expeditions')") &&
   navigationSource.includes("expeditionCycle().phase !== 'due'"),
-  'visible navigation must be suppressed for background-supported information pages'
+  'visible navigation must be suppressed only after fresh background observations'
 );
 
 assert(
@@ -76,5 +80,5 @@ assert(
 console.log('Background GET whitelist: OK');
 console.log('Detached HTML parsing: OK');
 console.log('Expedition/league/collection background observation: OK');
-console.log('Visible navigation suppression: OK');
+console.log('Fresh-route navigation suppression + fallback: OK');
 console.log('Background POST actions without page changes: OK');
