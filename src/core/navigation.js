@@ -5,7 +5,7 @@ function moduleEnabled(moduleId) {
       greenhouse: config.autoHarvest || config.autoPlant,
       incubator: config.autoIncubatorClaim,
       breeding: config.autoBreedingClaim,
-      progression: config.autoProgression,
+      progression: config.autoProgression || config.autoGyms,
     };
     return Boolean(rules[moduleId]);
   }
@@ -443,6 +443,13 @@ function moduleEnabled(moduleId) {
           reasons.push('équipe détectée KO/blessée');
         }
 
+        if (module.id === 'progression' && config.autoGyms && leagueNeedsDailyCheck()) {
+          const gymReason = leagueAttentionReason();
+          const knownAvailable = gymCycle().availableToday === true;
+          score += knownAvailable ? 1300 : 520;
+          reasons.push(gymReason || 'vérification quotidienne des arènes');
+        }
+
         const expeditionState = expeditionCycle();
         if (
           module.id === 'expeditions' &&
@@ -494,6 +501,29 @@ function moduleEnabled(moduleId) {
         priority: 10000,
         reason: 'confirmation d’une action du bot',
         run: handleConfirmation,
+      });
+    }
+
+    if (
+      config.autoGyms &&
+      (isLeagueIndexPage() || isGymPreparePage())
+    ) {
+      let priority = 8350;
+      let reason = 'vérification du Circuit des Arènes';
+
+      if (isGymPreparePage()) {
+        priority = 9350;
+        reason = 'composition et lancement du combat d’arène';
+      } else if (leagueDailyStatus() === true && availableGymContext()) {
+        priority = 8500;
+        reason = 'combat d’arène du jour disponible';
+      }
+
+      plan.push({
+        name: 'gym',
+        priority,
+        reason,
+        run: handleLeagueAutomation,
       });
     }
 
