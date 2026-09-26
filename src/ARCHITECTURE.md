@@ -52,3 +52,18 @@ Toutes les versions utilisent strictement le format `X.X.X`.
 6. commit les artefacts générés avec `[skip ci]` pour éviter une boucle.
 
 Ainsi, les changements fonctionnels se font dans `src/`, tandis que `poketaka.user.js` reste presque immuable.
+
+
+## Mise à jour immédiate du runtime
+
+Tampermonkey contrôle lui-même la fréquence à laquelle il vérifie `@updateURL`. Le loader ne dépend donc plus de cette fréquence pour les fonctionnalités du bot.
+
+À chaque chargement de PokéTaka, le loader :
+
+1. récupère `dist/version.json` depuis GitHub Raw avec un cache-buster ;
+2. récupère `dist/runtime.js` correspondant à la dernière version publiée ;
+3. vérifie que le runtime contient une version valide `X.X.X` ;
+4. met le runtime en cache local ;
+5. l'exécute même si la version du userscript installée par Tampermonkey est encore plus ancienne.
+
+Tampermonkey continuera à mettre à jour le loader via `@updateURL` selon ses propres réglages, mais ce délai ne bloque plus les mises à jour fonctionnelles.
