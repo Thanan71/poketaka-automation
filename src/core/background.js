@@ -422,13 +422,28 @@ async function backgroundHandleExpeditionResult(active) {
       isNew: capture.isNew,
       rarity: capture.rarity,
       ivScore: capture.ivScore,
-      ballName: null,
-      ballCode: capture.form.querySelector('input[name="ball_code"]:checked')?.value || null,
+      ballName: capture.ballName || null,
+      ballCode: capture.ballCode || capture.form.querySelector('input[name="ball_code"]:checked')?.value || null,
       ballReserve: capture.ballReserve,
       captureChance: capture.captureChance,
       attemptsRemaining: capture.attemptsRemaining,
       updatedAt: now(),
     };
+
+    if (capture.action === 'ignore' || capture.action === 'manual') {
+      appendActionLog(
+        capture.action === 'manual' ? 'warning' : 'info',
+        'capture',
+        `${capture.action === 'manual' ? 'Capture manuelle' : 'Capture ignorée'}: ${capture.species}`,
+        {
+          reason: capture.reason,
+          isNew: capture.isNew,
+          rarity: capture.rarity,
+          ivScore: capture.ivScore,
+        }
+      );
+    }
+
     saveState(state);
     updatePanel();
 
