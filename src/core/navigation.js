@@ -427,6 +427,12 @@ function moduleEnabled(moduleId) {
         let score = 0;
         const reasons = [];
 
+        const goalBonus = goalModulePriorityBonus(module.id);
+        if (goalBonus > 0) {
+          score += goalBonus;
+          reasons.push(`objectif global: ${currentGoalPlan().step?.title || currentGoalPlan().primary?.title || module.label}`);
+        }
+
         if (linkHasReadySignal(anchor)) {
           score += 1000;
           reasons.push('indicateur prêt dans la navigation');
@@ -615,7 +621,21 @@ function moduleEnabled(moduleId) {
       });
     }
 
-    return plan.sort((a, b) => b.priority - a.priority);
+    return plan
+      .map(candidate => {
+        const goalBonus = candidate.name.startsWith('navigation:')
+          ? 0
+          : goalCandidatePriorityBonus(candidate.name);
+
+        if (!goalBonus) return candidate;
+
+        return {
+          ...candidate,
+          priority: candidate.priority + goalBonus,
+          reason: `${candidate.reason}, objectif: ${currentGoalPlan().step?.title || currentGoalPlan().primary?.title}`,
+        };
+      })
+      .sort((a, b) => b.priority - a.priority);
   }
 
   function recordOrchestratorDecision(candidate) {
@@ -639,6 +659,10 @@ function moduleEnabled(moduleId) {
       }
 
       recordCurrentModuleStatus();
+      const snapshot = observeAccountSnapshot();
+      const goal = refreshGoalPlan(snapshot);
+      log('Goal Planner:', goal.primary?.title, '→', goal.step?.title);
+
       const plan = orchestratorPlan();
 
       for (const candidate of plan) {
