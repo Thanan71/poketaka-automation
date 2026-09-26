@@ -1087,7 +1087,9 @@ GM_addStyle(`
   function captureModeLabel() {
     if (!config.autoCapture) return 'Manuel';
     if (!config.smartCapture) return 'Auto simple';
-    return 'Intelligent';
+    return config.captureOwnedDuplicates
+      ? 'Intelligent · doublons autorisés'
+      : 'Intelligent · sans doublons';
   }
 
   function liveCapturePanelState() {
@@ -1416,6 +1418,7 @@ GM_addStyle(`
       'smartCapture',
       'captureNewSpecies',
       'captureRare',
+      'captureOwnedDuplicates',
       'captureUnknownEncounters',
     ];
 
@@ -1956,11 +1959,13 @@ GM_addStyle(`
             <div class="pta-settings-note">
               <strong>Capture auto</strong> autorise le bot à lancer une Ball.
               <strong>Capture intelligente</strong> applique ensuite les critères ci-dessous.
+              Par défaut, un Pokémon explicitement déjà possédé est bloqué avant les critères Rare/IV.
             </div>
             ${optionButton('autoCapture', 'Capture auto')}
             ${optionButton('smartCapture', 'Capture intelligente')}
             ${optionButton('captureNewSpecies', 'Nouvelles espèces')}
             ${optionButton('captureRare', 'Rares')}
+            ${optionButton('captureOwnedDuplicates', 'Autoriser doublons rares / IV')}
             ${optionButton('captureUnknownEncounters', 'Inconnues')}
 
             <div class="pta-stepper">
