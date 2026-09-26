@@ -5,7 +5,7 @@
   "description": "Tampermonkey automation assistant for poketaka.fr",
   "scripts": {
     "build": "node scripts/build.mjs",
-    "check": "npm run build && node --check dist/runtime.js && node --check dist/poketaka.user.js"
+    "check": "npm run build && node --check dist/runtime.js && node --check dist/poketaka.user.js && node scripts/test-goals.mjs"
   },
   "engines": {
     "node": ">=20"
