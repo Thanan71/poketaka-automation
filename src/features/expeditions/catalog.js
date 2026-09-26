@@ -16,22 +16,23 @@ function expeditionPrepareLink(card) {
     });
   }
 
-  function expeditionCards() {
+  function expeditionCards(root = document) {
+    const requireVisibility = root === document;
     // Sélecteur natif PokéTaka : les missions lançables se trouvent dans le
     // catalogue "available" et possèdent un lien /prepare.
-    const exact = [...document.querySelectorAll(
+    const exact = [...root.querySelectorAll(
       '.mission-catalog[data-panel="available"] .mission-card, .mission-catalog__grid > .mission-card'
     )]
-      .filter(isVisible)
+      .filter(card => !requireVisibility || isVisible(card))
       .filter(card => Boolean(expeditionPrepareLink(card)));
 
     if (exact.length) return exact;
 
     // Fallback pour rester compatible si le HTML du site évolue.
-    const candidates = [...document.querySelectorAll(
+    const candidates = [...root.querySelectorAll(
       'article, section, li, .card, [class*="card"], [class*="expedition"], [data-expedition], [data-route]'
     )]
-      .filter(isVisible)
+      .filter(el => !requireVisibility || isVisible(el))
       .filter(el => Boolean(expeditionPrepareLink(el)));
 
     const seen = new Set();
@@ -171,10 +172,10 @@ function expeditionPrepareLink(card) {
     return /termine|complete|completed|deja termine|already cleared|maitrise|mastered/i.test(text);
   }
 
-  function analyzeExpedition(card, index, pageContext) {
+  function analyzeExpedition(card, index, pageContext, root = document) {
   const detailsTrigger = card.querySelector('[data-open-dialog]');
   const detailsId = detailsTrigger?.getAttribute('data-open-dialog');
-  const details = detailsId ? document.getElementById(detailsId) : null;
+  const details = detailsId ? root.getElementById(detailsId) : null;
 
   const text = normalizeText([
     card.innerText || card.textContent || '',
@@ -326,11 +327,11 @@ function expeditionPrepareLink(card) {
   };
 }
 
-function rankExpeditions() {
-  const cards = expeditionCards();
-  const pageText = normalizeText(document.body?.innerText || '');
+function rankExpeditions(root = document) {
+  const cards = expeditionCards(root);
+  const pageText = normalizeText(root.body?.innerText || root.body?.textContent || '');
   const historyTitles = new Set(
-    [...document.querySelectorAll('.mission-archives a strong')]
+    [...root.querySelectorAll('.mission-archives a strong')]
       .map(element => normalizeText(element.textContent || ''))
       .filter(Boolean)
   );
@@ -341,7 +342,7 @@ function rankExpeditions() {
   };
 
   const ranking = cards
-    .map((card, index) => analyzeExpedition(card, index, pageContext))
+    .map((card, index) => analyzeExpedition(card, index, pageContext, root))
     .filter(item => item.button)
     .sort((a, b) => b.score - a.score);
 
@@ -396,17 +397,8 @@ function expeditionProgressionCandidates(ranking) {
     });
 }
 
-async function startExpedition() {
-  if (!config.autoStartExpeditions) return false;
-
-  const ranking = rankExpeditions();
-  if (!ranking.length) {
-    state.selectedExpedition = null;
-    state.selectedExpeditionScore = null;
-    saveState(state);
-    updatePanel();
-    return false;
-  }
+function selectExpeditionFromRanking(ranking) {
+  if (!ranking?.length) return null;
 
   let selected = ranking.find(item => !item.blocked) || ranking[0];
   const goal = currentGoalPlan();
@@ -420,10 +412,7 @@ async function startExpedition() {
       item.failureStreak < 2 &&
       item.teamPlan.viable !== false
     );
-
-    if (exact) {
-      selected = exact;
-    }
+    if (exact) selected = exact;
   } else if (goal.step?.action === 'farm_captures') {
     const captureCandidates = ranking
       .filter(item => !item.blocked)
@@ -436,12 +425,30 @@ async function startExpedition() {
         const durationB = b.durationMinutes ?? Infinity;
         return durationA - durationB;
       });
-
     if (captureCandidates.length) selected = captureCandidates[0];
   } else if (config.strategy === 'progression') {
     const candidates = expeditionProgressionCandidates(ranking);
     if (candidates.length) selected = candidates[0];
   }
+
+  return selected;
+}
+
+async function startExpedition() {
+  if (!config.autoStartExpeditions) return false;
+
+  const ranking = rankExpeditions();
+  if (!ranking.length) {
+    state.selectedExpedition = null;
+    state.selectedExpeditionScore = null;
+    saveState(state);
+    updatePanel();
+    return false;
+  }
+
+  const selected = selectExpeditionFromRanking(ranking);
+  const goal = currentGoalPlan();
+  const targetExpedition = goalTargetExpedition();
 
   state.selectedExpedition = selected.title;
   state.selectedExpeditionScore = selected.score;
