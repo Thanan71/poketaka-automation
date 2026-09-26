@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PokéTaka Automation
 // @namespace    https://github.com/Thanan71/poketaka-automation
-// @version      0.3.3
+// @version      0.4.0
 // @description  Assistant d'automatisation DOM pour PokéTaka : expéditions, récompenses, soins, serre et progression.
 // @author       Thanan71
 // @match        https://poketaka.fr/*
@@ -16,7 +16,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.3.3';
+  const VERSION = '0.4.0';
   const STORAGE_KEY = 'poketaka-automation:config';
   const STATE_KEY = 'poketaka-automation:state';
 
@@ -89,12 +89,47 @@
       selectedExpeditionScore: null,
       moduleStatus: {},
       lastNavigationAt: 0,
+      expeditionCycle: {
+        phase: 'unknown',
+        title: null,
+        resultUrl: null,
+        dueAt: null,
+        lastTransitionAt: 0,
+      },
       ...(GM_getValue(STATE_KEY, {}) || {}),
     };
   }
 
   function saveState(state) {
     GM_setValue(STATE_KEY, state);
+  }
+
+  function expeditionCycle() {
+    if (!state.expeditionCycle || typeof state.expeditionCycle !== 'object') {
+      state.expeditionCycle = {
+        phase: 'unknown',
+        title: null,
+        resultUrl: null,
+        dueAt: null,
+        lastTransitionAt: 0,
+      };
+    }
+    return state.expeditionCycle;
+  }
+
+  function setExpeditionPhase(phase, patch = {}) {
+    const previous = expeditionCycle();
+    state.expeditionCycle = {
+      ...previous,
+      ...patch,
+      phase,
+      lastTransitionAt: previous.phase === phase
+        ? previous.lastTransitionAt
+        : now(),
+    };
+    saveState(state);
+    updatePanel();
+    log('Cycle expédition:', state.expeditionCycle);
   }
 
   let config = loadConfig();
