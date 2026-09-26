@@ -2,7 +2,7 @@
 (() => {
   'use strict';
 
-  const VERSION = "0.7.2";
+  const VERSION = "0.8.1";
 
 // ---- src/core/config.js ----
 const STORAGE_KEY = 'poketaka-automation:config';
@@ -24,6 +24,9 @@ const STORAGE_KEY = 'poketaka-automation:config';
     avoidLongLowValue: true,
     smartTeam: true,
     minTeamHpPercent: 45,
+    maxRecommendedLevelDeficit: 2,
+    rosterCacheMinutes: 30,
+    missionBlockMinutes: 20,
     autoCapture: false,
     smartCapture: true,
     captureNewSpecies: true,
@@ -120,6 +123,20 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
         lastSelection: [],
         lastMissionTypes: [],
         lastRecommendedLevel: null,
+      },
+      rosterSnapshot: {
+        capturedAt: 0,
+        pokemon: [],
+      },
+      expeditionBlocks: {},
+      expeditionPlan: {
+        title: null,
+        team: [],
+        teamIds: [],
+        teamScore: null,
+        viability: 'unknown',
+        reason: null,
+        updatedAt: 0,
       },
       captureDecision: {
         action: 'none',
@@ -262,6 +279,493 @@ function elementText(el) {
     if (!confirm) return false;
     return clickElement(confirm, 'Confirmation');
   }
+
+// ---- src/features/expeditions/team.js ----
+function expeditionTeamRequirement() {
+  const form = document.querySelector('form.expedition-prep[data-team-builder]');
+  if (!form) return null;
+
+  const min = Number(form.getAttribute('data-team-min') || 1);
+  const max = Number(form.getAttribute('data-team-max') || min);
+  const selectedIds = [...form.querySelectorAll('[data-team-select]')]
+    .map(select => select.value)
+    .filter(Boolean);
+
+  return { form, min, max, selected: selectedIds.length, selectedIds };
+}
+
+function canonicalType(value) {
+  const type = normalizeText(value);
+  const aliases = {
+    fire: 'feu', water: 'eau', grass: 'plante', electric: 'electrik',
+    ice: 'glace', fighting: 'combat', ground: 'sol', flying: 'vol',
+    psychic: 'psy', bug: 'insecte', rock: 'roche', ghost: 'spectre',
+    dark: 'tenebres', steel: 'acier', fairy: 'fee',
+  };
+  return aliases[type] || type;
+}
+
+function typeMultiplier(attacker, defender) {
+  const atk = canonicalType(attacker);
+  const def = canonicalType(defender);
+  return TYPE_CHART[atk]?.[def] ?? 1;
+}
+
+function parseMissionTypes(text = '') {
+  const normalized = normalizeText(text);
+  const aliases = [
+    ['normal', ['normal']],
+    ['feu', ['feu', 'fire']],
+    ['eau', ['eau', 'water']],
+    ['electrik', ['electrik', 'electric']],
+    ['plante', ['plante', 'grass']],
+    ['glace', ['glace', 'ice']],
+    ['combat', ['combat', 'fighting']],
+    ['poison', ['poison']],
+    ['sol', ['sol', 'ground']],
+    ['vol', ['vol', 'flying']],
+    ['psy', ['psy', 'psychic']],
+    ['insecte', ['insecte', 'bug']],
+    ['roche', ['roche', 'rock']],
+    ['spectre', ['spectre', 'ghost']],
+    ['dragon', ['dragon']],
+    ['tenebres', ['tenebres', 'dark']],
+    ['acier', ['acier', 'steel']],
+    ['fee', ['fee', 'fairy']],
+  ];
+
+  return aliases
+    .filter(([, words]) => words.some(word => new RegExp(`\\b${word}\\b`, 'i').test(normalized)))
+    .map(([type]) => type);
+}
+
+function parseRequiredTeamSize(text = '') {
+  return parseFirstMatch(normalizeText(text), [
+    /(?:equipe|team)\s*[:=-]?\s*(\d+)\s*(?:pokemon|pokemons)?/i,
+    /(?:pokemon|pokemons)\s*(?:requis|required)?\s*[:=-]?\s*(\d+)/i,
+  ]) || 1;
+}
+
+function expeditionPreparationContext(requirement) {
+  const root = requirement?.form?.closest('main') || document;
+  const facts = {};
+
+  root.querySelectorAll('.expedition-prep-facts > div').forEach(row => {
+    const key = normalizeText(row.querySelector('dt')?.textContent || '');
+    const value = normalizeText(row.querySelector('dd')?.textContent || '');
+    if (key) facts[key] = value;
+  });
+
+  const typeText = facts['types principaux'] || facts.types || '';
+  const missionTypes = parseMissionTypes(typeText);
+
+  const recommendedLevel = parseNumber(
+    (facts['niveau conseille'] || facts['niveau recommandé'] || '').match(/\d+(?:[.,]\d+)?/)?.[0]
+  );
+
+  return {
+    title: normalizeText(root.querySelector('.page-header h1, h1')?.textContent || ''),
+    missionTypes,
+    recommendedLevel,
+    durationMinutes: parseDurationMinutes(facts.duree || facts.duration || ''),
+    teamSize: requirement?.min || parseRequiredTeamSize(facts.equipe || ''),
+  };
+}
+
+function pokemonFromCard(card) {
+  const hp = parseNumber(card.getAttribute('data-pokemon-hp')) || 0;
+  const hpMax = parseNumber(card.getAttribute('data-pokemon-hp-max')) || hp || 1;
+
+  return {
+    card,
+    id: card.getAttribute('data-pokemon-id') || '',
+    name: card.getAttribute('data-pokemon-name') || normalizeText(card.textContent || ''),
+    level: parseNumber(card.getAttribute('data-pokemon-level')) || 0,
+    hp,
+    hpMax,
+    hpPercent: hpMax > 0 ? (hp / hpMax) * 100 : 0,
+    types: (card.getAttribute('data-pokemon-types') || '')
+      .split(/[\s,;/]+/)
+      .map(canonicalType)
+      .filter(Boolean),
+    favorite: card.getAttribute('data-pokemon-favorite') === '1',
+    heldItem: Boolean(card.getAttribute('data-pokemon-held-item')),
+  };
+}
+
+function serializablePokemon(pokemon) {
+  return {
+    id: pokemon.id,
+    name: pokemon.name,
+    level: pokemon.level,
+    hp: pokemon.hp,
+    hpMax: pokemon.hpMax,
+    hpPercent: pokemon.hpPercent,
+    types: pokemon.types,
+    favorite: pokemon.favorite,
+    heldItem: pokemon.heldItem,
+  };
+}
+
+function scorePokemonForMission(pokemon, context) {
+  let score = pokemon.level * 12;
+  const reasons = [`niveau ${pokemon.level}`];
+
+  score += pokemon.hpPercent * 0.55;
+  reasons.push(`PV ${Math.round(pokemon.hpPercent)}%`);
+
+  let viable = pokemon.hpPercent >= config.minTeamHpPercent;
+  if (!viable) {
+    score -= 1000;
+    reasons.push(`PV sous ${config.minTeamHpPercent}%`);
+  }
+
+  if (context.recommendedLevel != null) {
+    const delta = pokemon.level - context.recommendedLevel;
+
+    if (delta >= 0) {
+      const bonus = Math.min(90, 30 + delta * 9);
+      score += bonus;
+      reasons.push(`+${bonus} niveau adapté`);
+    } else {
+      const deficit = Math.abs(delta);
+      const penalty = Math.min(700, deficit * 80);
+      score -= penalty;
+      reasons.push(`-${penalty} déficit niveau ${deficit}`);
+
+      if (deficit > config.maxRecommendedLevelDeficit) {
+        viable = false;
+        reasons.push(`déficit > ${config.maxRecommendedLevelDeficit}`);
+      }
+    }
+  }
+
+  if (context.missionTypes?.length && pokemon.types?.length) {
+    const offensive = context.missionTypes.reduce((sum, defender) => {
+      const best = Math.max(
+        ...pokemon.types.map(attacker => typeMultiplier(attacker, defender))
+      );
+
+      if (best >= 2) return sum + 50;
+      if (best > 1) return sum + 20;
+      if (best === 0) return sum - 90;
+      if (best < 1) return sum - 30;
+      return sum;
+    }, 0);
+
+    const defensive = context.missionTypes.reduce((sum, attacker) => {
+      const received = pokemon.types.reduce(
+        (multiplier, defender) => multiplier * typeMultiplier(attacker, defender),
+        1
+      );
+
+      if (received === 0) return sum + 55;
+      if (received <= 0.25) return sum + 40;
+      if (received < 1) return sum + 25;
+      if (received >= 4) return sum - 90;
+      if (received > 1) return sum - 45;
+      return sum;
+    }, 0);
+
+    score += offensive + defensive;
+    if (offensive) reasons.push(`${offensive > 0 ? '+' : ''}${offensive} attaque/types`);
+    if (defensive) reasons.push(`${defensive > 0 ? '+' : ''}${defensive} défense/types`);
+  }
+
+  if (pokemon.favorite) score += 5;
+  if (pokemon.heldItem) score += 8;
+
+  return {
+    ...pokemon,
+    score: Math.round(score),
+    viable,
+    reasons,
+    missionTypes: context.missionTypes || [],
+    recommendedLevel: context.recommendedLevel ?? null,
+  };
+}
+
+function chooseTeamForMission(roster, context) {
+  const teamSize = Math.max(1, Number(context.teamSize || 1));
+  const ranked = roster
+    .map(pokemon => scorePokemonForMission(pokemon, context))
+    .sort((a, b) => b.score - a.score);
+
+  const viable = ranked.filter(pokemon => pokemon.viable);
+  const team = [];
+  const usedTypes = new Set();
+
+  while (team.length < teamSize) {
+    const remaining = viable.filter(pokemon => !team.some(member => member.id === pokemon.id));
+    if (!remaining.length) break;
+
+    const next = remaining
+      .map(pokemon => {
+        const newTypes = pokemon.types.filter(type => !usedTypes.has(type)).length;
+        const overlap = pokemon.types.filter(type => usedTypes.has(type)).length;
+        return {
+          pokemon,
+          adjustedScore: pokemon.score + newTypes * 18 - overlap * 6,
+        };
+      })
+      .sort((a, b) => b.adjustedScore - a.adjustedScore)[0]?.pokemon;
+
+    if (!next) break;
+    team.push(next);
+    next.types.forEach(type => usedTypes.add(type));
+  }
+
+  const complete = team.length >= teamSize;
+  const teamScore = team.length
+    ? Math.round(team.reduce((sum, pokemon) => sum + pokemon.score, 0) / team.length)
+    : null;
+
+  const avgLevel = team.length
+    ? team.reduce((sum, pokemon) => sum + pokemon.level, 0) / team.length
+    : null;
+
+  const minHpPercent = team.length
+    ? Math.min(...team.map(pokemon => pokemon.hpPercent))
+    : null;
+
+  return {
+    known: roster.length > 0,
+    viable: complete,
+    teamSize,
+    team,
+    ranked,
+    teamScore,
+    avgLevel,
+    minHpPercent,
+    reason: complete
+      ? `équipe viable ${team.map(pokemon => pokemon.name).join(', ')}`
+      : `seulement ${team.length}/${teamSize} Pokémon viable(s)`,
+  };
+}
+
+function updateRosterSnapshot(requirement) {
+  if (!requirement?.form) return [];
+
+  const visibleRoster = [...requirement.form.querySelectorAll('[data-team-pokemon][data-pokemon-id]')]
+    .map(pokemonFromCard)
+    .filter(pokemon => pokemon.id);
+
+  const previousById = new Map(
+    (state.rosterSnapshot?.pokemon || []).map(pokemon => [pokemon.id, pokemon])
+  );
+
+  const mergedById = new Map();
+  for (const pokemon of visibleRoster) mergedById.set(pokemon.id, pokemon);
+
+  for (const selectedId of requirement.selectedIds || []) {
+    if (!mergedById.has(selectedId) && previousById.has(selectedId)) {
+      mergedById.set(selectedId, previousById.get(selectedId));
+    }
+  }
+
+  const roster = [...mergedById.values()];
+  state.rosterSnapshot = {
+    capturedAt: now(),
+    pokemon: roster.map(serializablePokemon),
+  };
+  saveState(state);
+  return roster;
+}
+
+function cachedRoster() {
+  const snapshot = state.rosterSnapshot;
+  if (!snapshot?.capturedAt || !Array.isArray(snapshot.pokemon)) return [];
+
+  const maxAgeMs = config.rosterCacheMinutes * 60 * 1000;
+  if (now() - snapshot.capturedAt > maxAgeMs) return [];
+
+  return snapshot.pokemon;
+}
+
+function estimateTeamForMission(context) {
+  const roster = cachedRoster();
+  if (!roster.length) {
+    return {
+      known: false,
+      viable: null,
+      teamSize: context.teamSize || 1,
+      team: [],
+      ranked: [],
+      teamScore: null,
+      avgLevel: null,
+      minHpPercent: null,
+      reason: 'roster inconnu',
+    };
+  }
+
+  return chooseTeamForMission(roster, context);
+}
+
+function currentMissionBlock(title) {
+  const block = state.expeditionBlocks?.[title];
+  if (!block?.until) return null;
+  if (block.until <= now()) {
+    delete state.expeditionBlocks[title];
+    saveState(state);
+    return null;
+  }
+  return block;
+}
+
+function blockMissionTemporarily(title, reason) {
+  const until = now() + config.missionBlockMinutes * 60 * 1000;
+  state.expeditionBlocks = {
+    ...(state.expeditionBlocks || {}),
+    [title]: { until, reason, createdAt: now() },
+  };
+  saveState(state);
+  return until;
+}
+
+function preparationTeamPlan(requirement) {
+  const roster = updateRosterSnapshot(requirement);
+  const context = expeditionPreparationContext(requirement);
+  const plan = chooseTeamForMission(roster, context);
+
+  state.expeditionPlan = {
+    title: expeditionCycle().title || context.title,
+    team: plan.team.map(pokemon => pokemon.name),
+    teamIds: plan.team.map(pokemon => pokemon.id),
+    teamScore: plan.teamScore,
+    viability: plan.viable ? 'viable' : 'blocked',
+    reason: plan.reason,
+    updatedAt: now(),
+  };
+
+  state.smartTeam = {
+    lastSelection: plan.team.map(pokemon => pokemon.name),
+    lastMissionTypes: context.missionTypes,
+    lastRecommendedLevel: context.recommendedLevel,
+  };
+
+  saveState(state);
+  return { context, plan };
+}
+
+async function selectNextPlannedPokemon(requirement, assessment) {
+  const selected = new Set(requirement.selectedIds || []);
+  const next = assessment.plan.team.find(pokemon => !selected.has(pokemon.id));
+  if (!next) return false;
+
+  const select = [...requirement.form.querySelectorAll('select[data-team-select]')]
+    .find(input =>
+      !input.value &&
+      [...input.options].some(option => option.value === next.id)
+    );
+
+  if (select) {
+    select.value = next.id;
+    select.dispatchEvent(new Event('input', { bubbles: true }));
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+
+    state.lastAction = `Équipe intelligente: ${next.name} (score ${next.score})`;
+    state.lastActionAt = now();
+    state.lastBotClickAt = now();
+    state.actions += 1;
+    saveState(state);
+    updatePanel();
+    log('Équipe intelligente via select:', next);
+    return true;
+  }
+
+  const card = assessment.plan.ranked.find(pokemon => pokemon.id === next.id)?.card;
+  if (card && isVisible(card)) {
+    return clickElement(
+      card,
+      `Équipe intelligente: ${next.name} (score ${next.score})`
+    );
+  }
+
+  return false;
+}
+
+async function handleExpeditionPreparation() {
+  if (!config.autoStartExpeditions) return false;
+
+  const requirement = expeditionTeamRequirement();
+  if (!requirement) return false;
+
+  const assessment = preparationTeamPlan(requirement);
+  const canonicalTitle = expeditionCycle().title || assessment.context.title || 'expedition';
+
+  if (assessment.plan.viable && state.expeditionBlocks?.[canonicalTitle]) {
+    delete state.expeditionBlocks[canonicalTitle];
+    saveState(state);
+  }
+
+  if (config.smartTeam && !assessment.plan.viable) {
+    const title = canonicalTitle;
+    blockMissionTemporarily(title, assessment.plan.reason);
+
+    state.lastAction = `Mission écartée: ${title} — ${assessment.plan.reason}`;
+    saveState(state);
+    updatePanel();
+
+    const link = expeditionIndexLink();
+    if (link) {
+      setExpeditionPhase('ready_to_start', {
+        title: null,
+        resultUrl: null,
+        dueAt: null,
+      });
+      return clickElement(link, 'Équipe insuffisante — retour aux expéditions');
+    }
+
+    return false;
+  }
+
+  if (requirement.selected < requirement.min) {
+    if (config.smartTeam) {
+      const selected = await selectNextPlannedPokemon(requirement, assessment);
+      if (selected) {
+        setExpeditionPhase('preparing');
+        return true;
+      }
+    }
+
+    const lastTeamButton = document.querySelector(
+      'button[data-last-expedition-team][data-last-team-ids]'
+    );
+
+    if (lastTeamButton && isVisible(lastTeamButton)) {
+      setExpeditionPhase('preparing');
+      return clickElement(lastTeamButton, 'Application de la dernière équipe');
+    }
+
+    state.lastAction = `Préparation bloquée — équipe ${requirement.selected}/${requirement.min}`;
+    saveState(state);
+    updatePanel();
+    return false;
+  }
+
+  const launchButton = findClickable([
+    'lancer l expedition',
+    'lancer expedition',
+    'commencer l expedition',
+    'commencer expedition',
+    'confirmer le depart',
+    'confirmer depart',
+    'partir',
+    'demarrer',
+    'start expedition',
+    'start',
+  ], requirement.form, {
+    exclude: ['annuler', 'cancel', 'acheter', 'buy'],
+  });
+
+  if (launchButton) {
+    if (recentBotAction(1800)) return false;
+    setExpeditionPhase('starting');
+    return clickElement(launchButton, 'Lancement de l’expédition');
+  }
+
+  return false;
+}
 
 // ---- src/features/expeditions/cycle.js ----
 async function claimExpedition() {
@@ -594,258 +1098,6 @@ async function claimExpedition() {
     if (!link) return false;
     setExpeditionPhase('ready_to_start', { resultUrl: null, dueAt: null });
     return clickElement(link, 'Retour aux expéditions');
-  }
-
-  function expeditionTeamRequirement() {
-    const form = document.querySelector('form.expedition-prep[data-team-builder]');
-    if (!form) return null;
-
-    const min = Number(form.getAttribute('data-team-min') || 1);
-    const max = Number(form.getAttribute('data-team-max') || min);
-    const selectedIds = [...form.querySelectorAll('[data-team-select]')]
-      .map(select => select.value)
-      .filter(Boolean);
-
-    return { form, min, max, selected: selectedIds.length, selectedIds };
-  }
-
-  function canonicalType(value) {
-    const type = normalizeText(value);
-    const aliases = {
-      fire: 'feu', water: 'eau', grass: 'plante', electric: 'electrik',
-      ice: 'glace', fighting: 'combat', ground: 'sol', flying: 'vol',
-      psychic: 'psy', bug: 'insecte', rock: 'roche', ghost: 'spectre',
-      dark: 'tenebres', steel: 'acier', fairy: 'fee',
-    };
-    return aliases[type] || type;
-  }
-
-  function typeMultiplier(attacker, defender) {
-    const atk = canonicalType(attacker);
-    const def = canonicalType(defender);
-    return TYPE_CHART[atk]?.[def] ?? 1;
-  }
-
-  function expeditionPreparationContext(requirement) {
-    const root = requirement?.form?.closest('main') || document;
-    const facts = {};
-
-    root.querySelectorAll('.expedition-prep-facts > div').forEach(row => {
-      const key = normalizeText(row.querySelector('dt')?.textContent || '');
-      const value = normalizeText(row.querySelector('dd')?.textContent || '');
-      if (key) facts[key] = value;
-    });
-
-    const typeText = facts['types principaux'] || facts.types || '';
-    const missionTypes = typeText
-      .split(/[,/]/)
-      .map(canonicalType)
-      .filter(Boolean);
-
-    const recommendedLevel = parseNumber(
-      (facts['niveau conseille'] || facts['niveau recommandé'] || '').match(/\d+(?:[.,]\d+)?/)?.[0]
-    );
-
-    return {
-      title: normalizeText(root.querySelector('.page-header h1, h1')?.textContent || ''),
-      missionTypes,
-      recommendedLevel,
-      durationMinutes: parseDurationMinutes(facts.duree || facts.duration || ''),
-    };
-  }
-
-  function pokemonFromCard(card) {
-    const hp = parseNumber(card.getAttribute('data-pokemon-hp')) || 0;
-    const hpMax = parseNumber(card.getAttribute('data-pokemon-hp-max')) || hp || 1;
-    return {
-      card,
-      id: card.getAttribute('data-pokemon-id') || '',
-      name: card.getAttribute('data-pokemon-name') || normalizeText(card.textContent || ''),
-      level: parseNumber(card.getAttribute('data-pokemon-level')) || 0,
-      hp,
-      hpMax,
-      hpPercent: hpMax > 0 ? (hp / hpMax) * 100 : 0,
-      types: (card.getAttribute('data-pokemon-types') || '')
-        .split(/[\s,;/]+/)
-        .map(canonicalType)
-        .filter(Boolean),
-      favorite: card.getAttribute('data-pokemon-favorite') === '1',
-      heldItem: Boolean(card.getAttribute('data-pokemon-held-item')),
-    };
-  }
-
-  function pokemonMatchupScore(pokemon, context) {
-    if (!context.missionTypes.length || !pokemon.types.length) return 0;
-
-    const multipliers = context.missionTypes.map(defender =>
-      Math.max(...pokemon.types.map(attacker => typeMultiplier(attacker, defender)))
-    );
-
-    return multipliers.reduce((sum, value) => {
-      if (value >= 2) return sum + 45;
-      if (value > 1) return sum + 20;
-      if (value === 0) return sum - 80;
-      if (value < 1) return sum - 25;
-      return sum;
-    }, 0);
-  }
-
-  function rankAvailablePokemon(requirement) {
-    if (!requirement?.form) return [];
-
-    const context = expeditionPreparationContext(requirement);
-    const selected = new Set(requirement.selectedIds || []);
-
-    const ranking = [...requirement.form.querySelectorAll('[data-team-pokemon][data-pokemon-id]')]
-      .map(pokemonFromCard)
-      .filter(pokemon => pokemon.id && !selected.has(pokemon.id))
-      .map(pokemon => {
-        let score = pokemon.level * 12;
-        const reasons = [`niveau ${pokemon.level}`];
-
-        score += pokemon.hpPercent * 0.55;
-        reasons.push(`PV ${Math.round(pokemon.hpPercent)}%`);
-
-        if (pokemon.hpPercent < config.minTeamHpPercent) {
-          score -= 1000;
-          reasons.push(`PV sous ${config.minTeamHpPercent}%`);
-        }
-
-        if (context.recommendedLevel != null) {
-          const delta = pokemon.level - context.recommendedLevel;
-          if (delta >= 0) {
-            const bonus = Math.min(80, 25 + delta * 8);
-            score += bonus;
-            reasons.push(`+${bonus} niveau adapté`);
-          } else {
-            const penalty = Math.min(500, Math.abs(delta) * 65);
-            score -= penalty;
-            reasons.push(`-${penalty} sous le niveau conseillé`);
-          }
-        }
-
-        const matchup = pokemonMatchupScore(pokemon, context);
-        score += matchup;
-        if (matchup) reasons.push(`${matchup > 0 ? '+' : ''}${matchup} types`);
-
-        if (pokemon.favorite) score += 5;
-        if (pokemon.heldItem) score += 8;
-
-        return {
-          ...pokemon,
-          score: Math.round(score),
-          reasons,
-          missionTypes: context.missionTypes,
-          recommendedLevel: context.recommendedLevel,
-        };
-      })
-      .sort((a, b) => b.score - a.score);
-
-    if (config.debug && ranking.length) {
-      console.table(ranking.map(item => ({
-        pokemon: item.name,
-        score: item.score,
-        niveau: item.level,
-        pv: Math.round(item.hpPercent) + '%',
-        types: item.types.join(', '),
-        mission: item.missionTypes.join(', '),
-      })));
-    }
-
-    return ranking;
-  }
-
-  async function selectSmartPokemon(requirement) {
-    const ranking = rankAvailablePokemon(requirement);
-    const best = ranking.find(item => item.hpPercent >= config.minTeamHpPercent);
-    if (!best) return false;
-
-    state.smartTeam = {
-      lastSelection: [...(state.smartTeam?.lastSelection || []), best.name],
-      lastMissionTypes: best.missionTypes,
-      lastRecommendedLevel: best.recommendedLevel,
-    };
-    saveState(state);
-
-    const select = [...requirement.form.querySelectorAll('select[data-team-select]')]
-      .find(input => !input.value && [...input.options].some(option => option.value === best.id));
-
-    if (select) {
-      select.value = best.id;
-      select.dispatchEvent(new Event('input', { bubbles: true }));
-      select.dispatchEvent(new Event('change', { bubbles: true }));
-      state.lastAction = `Équipe intelligente: ${best.name} (score ${best.score})`;
-      state.lastActionAt = now();
-      state.lastBotClickAt = now();
-      state.actions += 1;
-      saveState(state);
-      updatePanel();
-      log('Équipe intelligente via select:', best);
-      return true;
-    }
-
-    if (isVisible(best.card)) {
-      return clickElement(
-        best.card,
-        `Équipe intelligente: ${best.name} (score ${best.score})`
-      );
-    }
-
-    return false;
-  }
-
-  async function handleExpeditionPreparation() {
-    if (!config.autoStartExpeditions) return false;
-
-    const requirement = expeditionTeamRequirement();
-    if (!requirement) return false;
-
-    if (requirement.selected < requirement.min) {
-      if (config.smartTeam) {
-        const selected = await selectSmartPokemon(requirement);
-        if (selected) {
-          setExpeditionPhase('preparing');
-          return true;
-        }
-      }
-
-      const lastTeamButton = document.querySelector(
-        'button[data-last-expedition-team][data-last-team-ids]'
-      );
-
-      if (lastTeamButton && isVisible(lastTeamButton)) {
-        setExpeditionPhase('preparing');
-        return clickElement(lastTeamButton, 'Application de la dernière équipe');
-      }
-
-      state.lastAction = `Préparation bloquée — équipe ${requirement.selected}/${requirement.min}`;
-      saveState(state);
-      updatePanel();
-      return false;
-    }
-
-    const launchButton = findClickable([
-      'lancer l expedition',
-      'lancer expedition',
-      'commencer l expedition',
-      'commencer expedition',
-      'confirmer le depart',
-      'confirmer depart',
-      'partir',
-      'demarrer',
-      'start expedition',
-      'start',
-    ], requirement.form, {
-      exclude: ['annuler', 'cancel', 'acheter', 'buy'],
-    });
-
-    if (launchButton) {
-      if (recentBotAction(1800)) return false;
-      setExpeditionPhase('starting');
-      return clickElement(launchButton, 'Lancement de l’expédition');
-    }
-
-    return false;
   }
 
   async function handleExpeditionCycle() {
@@ -1231,210 +1483,278 @@ function expeditionPrepareLink(card) {
   }
 
   function analyzeExpedition(card, index, pageContext) {
-    const detailsTrigger = card.querySelector('[data-open-dialog]');
-    const detailsId = detailsTrigger?.getAttribute('data-open-dialog');
-    const details = detailsId ? document.getElementById(detailsId) : null;
+  const detailsTrigger = card.querySelector('[data-open-dialog]');
+  const detailsId = detailsTrigger?.getAttribute('data-open-dialog');
+  const details = detailsId ? document.getElementById(detailsId) : null;
 
-    // PokéTaka place les informations de chance/niveau dans un dialog adjacent
-    // qui n'est pas visible tant que l'utilisateur ne l'ouvre pas.
-    const text = normalizeText([
-      card.innerText || card.textContent || '',
-      details?.textContent || '',
-    ].join(' '));
+  const text = normalizeText([
+    card.innerText || card.textContent || '',
+    details?.textContent || '',
+  ].join(' '));
 
-    const title = expeditionTitle(card, index);
-    const chance = parseChance(text);
-    const durationMinutes = parseDurationMinutes(text);
-    const requiredLevel = parseRequiredLevel(text);
-    const rewardScore = parseRewardValue(text);
-    const costs = parseResourceCost(text);
-    const progressionRank = zoneRank(text, index);
-    const completed = pageContext.historyTitles?.has(title) || isPreviouslyCompleted(text);
-    const newProgression = !completed || isNewProgression(text);
-    const stats = state.expeditionStats?.[title] || {};
-    const failureStreak = Number(stats.failureStreak || 0);
-    const startButton = expeditionPrepareLink(card);
+  const title = expeditionTitle(card, index);
+  const chance = parseChance(text);
+  const durationMinutes = parseDurationMinutes(text);
+  const requiredLevel = parseRequiredLevel(text);
+  const rewardScore = parseRewardValue(text);
+  const costs = parseResourceCost(text);
+  const progressionRank = zoneRank(text, index);
+  const missionTypes = parseMissionTypes(text);
+  const teamSize = parseRequiredTeamSize(text);
+  const completed = pageContext.historyTitles?.has(title) || isPreviouslyCompleted(text);
+  const newProgression = !completed || isNewProgression(text);
+  const stats = state.expeditionStats?.[title] || {};
+  const failureStreak = Number(stats.failureStreak || 0);
+  const startButton = expeditionPrepareLink(card);
+  const block = currentMissionBlock(title);
 
-    let score = progressionRank * 6;
-    const reasons = [];
+  const teamPlan = estimateTeamForMission({
+    title,
+    missionTypes,
+    recommendedLevel: requiredLevel,
+    teamSize,
+    durationMinutes,
+  });
 
-    if (newProgression) {
-      score += 180;
-      reasons.push('+180 nouvelle progression');
-    }
+  let score = progressionRank * 18;
+  const reasons = [];
 
-    if (completed) {
-      score -= 45;
-      reasons.push('-45 déjà terminée');
-    }
+  if (newProgression) {
+    score += 300;
+    reasons.push('+300 nouvelle progression');
+  }
 
-    if (failureStreak > 0) {
-      const failurePenalty = failureStreak >= 2
-        ? 650 + (failureStreak - 2) * 180
-        : 180;
-      score -= failurePenalty;
-      reasons.push(`-${failurePenalty} échecs consécutifs (${failureStreak})`);
-    }
+  if (completed) {
+    score -= 80;
+    reasons.push('-80 déjà terminée');
+  }
 
-    if (chance != null) {
-      const encounterBonus = chance * 0.45;
-      score += encounterBonus;
-      reasons.push(`+${Math.round(encounterBonus)} potentiel rencontre ${chance}%`);
-    }
+  if (block) {
+    score -= 5000;
+    reasons.push(`-5000 temporairement écartée: ${block.reason}`);
+  }
 
-    if (requiredLevel != null && pageContext.teamLevel != null) {
-      const delta = pageContext.teamLevel - requiredLevel;
-      if (delta >= 0) {
-        score += Math.min(80, delta * 8 + 20);
-        reasons.push(`niveau OK +${Math.round(delta)}`);
-      } else {
-        score -= Math.min(350, Math.abs(delta) * 45);
-        reasons.push(`niveau insuffisant ${Math.round(delta)}`);
+  if (failureStreak > 0) {
+    const failurePenalty = failureStreak >= 2
+      ? 900 + (failureStreak - 2) * 250
+      : 220;
+    score -= failurePenalty;
+    reasons.push(`-${failurePenalty} échecs consécutifs (${failureStreak})`);
+  }
+
+  if (teamPlan.known) {
+    if (teamPlan.viable) {
+      const teamBonus = Math.max(
+        -120,
+        Math.min(220, Math.round((teamPlan.teamScore || 0) * 0.35))
+      );
+      score += teamBonus;
+      reasons.push(
+        `${teamBonus >= 0 ? '+' : ''}${teamBonus} équipe ${teamPlan.team.map(p => p.name).join(', ')}`
+      );
+
+      if (requiredLevel != null && teamPlan.avgLevel != null) {
+        const margin = teamPlan.avgLevel - requiredLevel;
+        const levelBonus = margin >= 0
+          ? Math.min(120, 35 + margin * 12)
+          : Math.max(-300, margin * 90);
+        score += levelBonus;
+        reasons.push(
+          `${levelBonus >= 0 ? '+' : ''}${Math.round(levelBonus)} niveau équipe vs conseillé`
+        );
       }
+    } else {
+      score -= 1800;
+      reasons.push(`-1800 aucune équipe viable (${teamPlan.reason})`);
     }
+  } else {
+    reasons.push('roster inconnu — validation sur la page de préparation');
+  }
 
-    score += rewardScore;
-    if (rewardScore > 0) reasons.push(`+${Math.round(rewardScore)} récompenses`);
+  if (chance != null) {
+    const encounterBonus = chance * 0.25;
+    score += encounterBonus;
+    reasons.push(`+${Math.round(encounterBonus)} potentiel rencontre ${chance}%`);
+  }
 
-    if (durationMinutes != null) {
-      const speedBonus = Math.max(-100, 90 - Math.log2(durationMinutes + 1) * 18);
-      score += speedBonus;
-      reasons.push(`${speedBonus >= 0 ? '+' : ''}${Math.round(speedBonus)} durée ${Math.round(durationMinutes)} min`);
+  score += rewardScore;
+  if (rewardScore > 0) reasons.push(`+${Math.round(rewardScore)} récompenses`);
 
-      if (config.avoidLongLowValue && durationMinutes >= 240 && rewardScore < 35 && !newProgression) {
-        score -= 120;
-        reasons.push('-120 longue/faible valeur');
-      }
-    }
+  if (durationMinutes != null) {
+    const speedBonus = Math.max(-60, 35 - Math.log2(durationMinutes + 1) * 8);
+    score += speedBonus;
+    reasons.push(
+      `${speedBonus >= 0 ? '+' : ''}${Math.round(speedBonus)} durée ${Math.round(durationMinutes)} min`
+    );
 
     if (
-      costs.energy != null &&
-      pageContext.resources.energy != null &&
-      costs.energy > pageContext.resources.energy
+      config.avoidLongLowValue &&
+      durationMinutes >= 240 &&
+      rewardScore < 35 &&
+      !newProgression
     ) {
-      score -= 1000;
-      reasons.push('-1000 énergie insuffisante');
+      score -= 120;
+      reasons.push('-120 longue/faible valeur');
     }
-
-    if (/verrouille|locked|indisponible|unavailable|equipe occupee|team busy/i.test(text)) {
-      score -= 2000;
-      reasons.push('-2000 indisponible');
-    }
-
-    return {
-      card,
-      button: startButton,
-      index,
-      title,
-      chance,
-      durationMinutes,
-      requiredLevel,
-      teamLevel: pageContext.teamLevel,
-      rewardScore: Math.round(rewardScore),
-      progressionRank,
-      newProgression,
-      completed,
-      failureStreak,
-      energyCost: costs.energy,
-      energyAvailable: pageContext.resources.energy,
-      score: Math.round(score),
-      reasons,
-    };
   }
 
-  function rankExpeditions() {
-    const cards = expeditionCards();
-    const pageText = normalizeText(document.body?.innerText || '');
-    const historyTitles = new Set(
-      [...document.querySelectorAll('.mission-archives a strong')]
-        .map(element => normalizeText(element.textContent || ''))
-        .filter(Boolean)
-    );
-
-    const pageContext = {
-      // Le catalogue n'expose pas le niveau réel de l'équipe disponible.
-      // Ne jamais le déduire du texte des missions : "Niveau conseillé"
-      // appartient à la destination, pas à l'équipe du joueur.
-      teamLevel: null,
-      resources: parseAvailableResources(pageText),
-      historyTitles,
-    };
-
-    const ranking = cards
-      .map((card, index) => analyzeExpedition(card, index, pageContext))
-      .filter(item => item.button)
-      .sort((a, b) => b.score - a.score);
-
-    if (config.debug && ranking.length) {
-      console.table(ranking.map(item => ({
-        expedition: item.title,
-        score: item.score,
-        zone: item.progressionRank,
-        chance: item.chance ?? '?',
-        niveauRequis: item.requiredLevel ?? '?',
-        niveauEquipe: item.teamLevel ?? '?',
-        dureeMin: item.durationMinutes != null ? Math.round(item.durationMinutes) : '?',
-        recompenses: item.rewardScore,
-        energie: item.energyCost ?? '?',
-        nouvelle: item.newProgression,
-        terminee: item.completed,
-      })));
-      log('Classement expéditions', ranking.map(item => ({
-        title: item.title,
-        score: item.score,
-        reasons: item.reasons,
-      })));
-    }
-
-    return ranking;
+  if (
+    costs.energy != null &&
+    pageContext.resources.energy != null &&
+    costs.energy > pageContext.resources.energy
+  ) {
+    score -= 1000;
+    reasons.push('-1000 énergie insuffisante');
   }
 
-  async function startExpedition() {
-    if (!config.autoStartExpeditions) return false;
+  if (/verrouille|locked|indisponible|unavailable|equipe occupee|team busy/i.test(text)) {
+    score -= 2000;
+    reasons.push('-2000 indisponible');
+  }
 
-    const ranking = rankExpeditions();
-    if (!ranking.length) {
-      state.selectedExpedition = null;
-      state.selectedExpeditionScore = null;
-      saveState(state);
-      updatePanel();
-      return false;
-    }
+  return {
+    card,
+    button: startButton,
+    index,
+    title,
+    chance,
+    durationMinutes,
+    requiredLevel,
+    missionTypes,
+    teamSize,
+    teamPlan,
+    rewardScore: Math.round(rewardScore),
+    progressionRank,
+    newProgression,
+    completed,
+    failureStreak,
+    blocked: Boolean(block),
+    block,
+    energyCost: costs.energy,
+    energyAvailable: pageContext.resources.energy,
+    score: Math.round(score),
+    reasons,
+  };
+}
 
-    let selected = ranking[0];
+function rankExpeditions() {
+  const cards = expeditionCards();
+  const pageText = normalizeText(document.body?.innerText || '');
+  const historyTitles = new Set(
+    [...document.querySelectorAll('.mission-archives a strong')]
+      .map(element => normalizeText(element.textContent || ''))
+      .filter(Boolean)
+  );
 
-    // En mode progression, privilégie la destination la plus avancée
-    // parmi celles qui restent dans le seuil de réussite configuré.
-    if (config.strategy === 'progression') {
-      const viableProgression = ranking
-        .filter(item => item.failureStreak < 2)
-        .sort((a, b) => {
-          if (a.index !== b.index) return b.index - a.index;
-          if (a.progressionRank !== b.progressionRank) return b.progressionRank - a.progressionRank;
-          return b.score - a.score;
-        });
+  const pageContext = {
+    resources: parseAvailableResources(pageText),
+    historyTitles,
+  };
 
-      if (viableProgression.length) selected = viableProgression[0];
-    }
+  const ranking = cards
+    .map((card, index) => analyzeExpedition(card, index, pageContext))
+    .filter(item => item.button)
+    .sort((a, b) => b.score - a.score);
 
-    state.selectedExpedition = selected.title;
-    state.selectedExpeditionScore = selected.score;
+  if (config.debug && ranking.length) {
+    console.table(ranking.map(item => ({
+      expedition: item.title,
+      score: item.score,
+      progression: item.progressionRank,
+      niveauConseille: item.requiredLevel ?? '?',
+      equipe: item.teamPlan.known
+        ? item.teamPlan.team.map(pokemon => pokemon.name).join(', ') || 'aucune'
+        : 'à confirmer',
+      equipeViable: item.teamPlan.viable ?? '?',
+      scoreEquipe: item.teamPlan.teamScore ?? '?',
+      types: item.missionTypes.join(', ') || '?',
+      rencontre: item.chance != null ? item.chance + '%' : '?',
+      dureeMin: item.durationMinutes != null ? Math.round(item.durationMinutes) : '?',
+      echecs: item.failureStreak,
+      bloquee: item.blocked,
+    })));
+
+    log('Classement expéditions intelligent', ranking.map(item => ({
+      title: item.title,
+      score: item.score,
+      team: item.teamPlan.team.map(pokemon => pokemon.name),
+      viable: item.teamPlan.viable,
+      reasons: item.reasons,
+    })));
+  }
+
+  return ranking;
+}
+
+function expeditionProgressionCandidates(ranking) {
+  return ranking
+    .filter(item => !item.blocked)
+    .filter(item => item.failureStreak < 2)
+    .filter(item => item.teamPlan.viable !== false)
+    .sort((a, b) => {
+      if (a.newProgression !== b.newProgression) {
+        return Number(b.newProgression) - Number(a.newProgression);
+      }
+      if (a.progressionRank !== b.progressionRank) {
+        return b.progressionRank - a.progressionRank;
+      }
+
+      const teamA = a.teamPlan.teamScore ?? -Infinity;
+      const teamB = b.teamPlan.teamScore ?? -Infinity;
+      if (teamA !== teamB) return teamB - teamA;
+
+      return b.score - a.score;
+    });
+}
+
+async function startExpedition() {
+  if (!config.autoStartExpeditions) return false;
+
+  const ranking = rankExpeditions();
+  if (!ranking.length) {
+    state.selectedExpedition = null;
+    state.selectedExpeditionScore = null;
     saveState(state);
     updatePanel();
-
-    setExpeditionPhase('preparing', {
-      title: selected.title,
-      resultUrl: null,
-      dueAt: null,
-    });
-
-    return clickElement(
-      selected.button,
-      `Préparation optimale: ${selected.title} (score ${selected.score})`
-    );
+    return false;
   }
 
-  async function autoProgression() {
+  let selected = ranking.find(item => !item.blocked) || ranking[0];
+
+  if (config.strategy === 'progression') {
+    const candidates = expeditionProgressionCandidates(ranking);
+    if (candidates.length) selected = candidates[0];
+  }
+
+  state.selectedExpedition = selected.title;
+  state.selectedExpeditionScore = selected.score;
+  state.expeditionPlan = {
+    title: selected.title,
+    team: selected.teamPlan.team.map(pokemon => pokemon.name),
+    teamIds: selected.teamPlan.team.map(pokemon => pokemon.id),
+    teamScore: selected.teamPlan.teamScore,
+    viability: selected.teamPlan.known
+      ? (selected.teamPlan.viable ? 'viable' : 'blocked')
+      : 'unknown',
+    reason: selected.teamPlan.reason,
+    updatedAt: now(),
+  };
+  saveState(state);
+  updatePanel();
+
+  setExpeditionPhase('preparing', {
+    title: selected.title,
+    resultUrl: null,
+    dueAt: null,
+  });
+
+  return clickElement(
+    selected.button,
+    `Préparation intelligente: ${selected.title} (score ${selected.score})`
+  );
+}
+
+async function autoProgression() {
     if (!config.autoProgression) return false;
 
     const button = findClickable([
@@ -2607,9 +2927,9 @@ GM_addStyle(`
             </div>
             <div class="pta-module">
               <span class="pta-mini-dot"></span>
-              <span class="pta-module-name">Équipe</span>
+              <span class="pta-module-name">Équipe prévue</span>
               <span class="pta-module-status">
-                ${escapeHtml((state.smartTeam?.lastSelection || []).slice(-3).join(', ') || '—')}
+                ${escapeHtml((state.expeditionPlan?.team || state.smartTeam?.lastSelection || []).slice(-3).join(', ') || '—')}
               </span>
             </div>
             <div class="pta-module">
@@ -2646,7 +2966,7 @@ GM_addStyle(`
           </div>
         </details>
 
-        <div class="pta-footer">Orchestrateur v0.7 · équipe intelligente · captures prudentes · actions destructrices bloquées</div>
+        <div class="pta-footer">Smart Expedition v0.8 · mission + équipe · captures prudentes · actions destructrices bloquées</div>
       </div>
     `;
   }
@@ -2681,8 +3001,12 @@ GM_registerMenuCommand('Activer / désactiver PokéTaka Automation', () => setEn
       expedition: item.title,
       score: item.score,
       chance: item.chance ?? '?',
-      niveauRequis: item.requiredLevel ?? '?',
-      niveauEquipe: item.teamLevel ?? '?',
+      niveauConseille: item.requiredLevel ?? '?',
+      equipe: item.teamPlan?.known
+        ? item.teamPlan.team.map(pokemon => pokemon.name).join(', ') || 'aucune'
+        : 'à confirmer',
+      equipeViable: item.teamPlan?.viable ?? '?',
+      scoreEquipe: item.teamPlan?.teamScore ?? '?',
       dureeMin: item.durationMinutes != null ? Math.round(item.durationMinutes) : '?',
       recompenses: item.rewardScore,
       nouvelle: item.newProgression,
