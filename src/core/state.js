@@ -86,6 +86,8 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
         selectedTeam: [],
         teamScore: null,
         reason: null,
+        needsHealing: false,
+        blockedUntil: 0,
         lastCheckAt: 0,
         lastChallengeAt: 0,
       },
