@@ -2,7 +2,7 @@
 // @name         PokéTaka Automation
 // @namespace    https://github.com/Thanan71/poketaka-automation
 // @version      __VERSION__
-// @description  Loader léger pour PokéTaka Automation. Le runtime est publié automatiquement depuis GitHub.
+// @description  Loader léger pour PokéTaka Automation. Le runtime est chargé depuis GitHub Raw.
 // @author       Thanan71
 // @match        https://poketaka.fr/*
 // @run-at       document-idle
@@ -12,9 +12,9 @@
 // @grant        GM_registerMenuCommand
 // @grant        GM_xmlhttpRequest
 // @grant        GM_info
-// @connect      thanan71.github.io
-// @updateURL    https://thanan71.github.io/poketaka-automation/poketaka.user.js
-// @downloadURL  https://thanan71.github.io/poketaka-automation/poketaka.user.js
+// @connect      raw.githubusercontent.com
+// @updateURL    https://raw.githubusercontent.com/Thanan71/poketaka-automation/main/poketaka.user.js
+// @downloadURL  https://raw.githubusercontent.com/Thanan71/poketaka-automation/main/poketaka.user.js
 // @license      MIT
 // ==/UserScript==
 
@@ -22,7 +22,7 @@
   'use strict';
 
   const SCRIPT_VERSION = GM_info?.script?.version || '__VERSION__';
-  const RUNTIME_URL = `https://thanan71.github.io/poketaka-automation/runtime.js?v=${encodeURIComponent(SCRIPT_VERSION)}`;
+  const RUNTIME_URL = `https://raw.githubusercontent.com/Thanan71/poketaka-automation/main/dist/runtime.js?v=${encodeURIComponent(SCRIPT_VERSION)}`;
   const CACHE_KEY = 'poketaka-automation:runtime-cache';
 
   function executeRuntime(code, source = RUNTIME_URL) {
@@ -49,7 +49,7 @@
   function runCachedRuntime(reason) {
     const cached = GM_getValue(CACHE_KEY, null);
     if (cached?.code) {
-      console.warn('[PokéTaka Loader] Runtime distant indisponible, cache local utilisé.', reason);
+      console.warn('[PokéTaka Loader] Runtime GitHub indisponible, cache local utilisé.', reason);
       executeRuntime(cached.code, 'poketaka-runtime-cache.js');
       return;
     }
