@@ -420,6 +420,22 @@ function moduleEnabled(moduleId) {
     return MODULES
       .filter(module => moduleEnabled(module.id))
       .filter(module => module.id !== current?.id)
+      .filter(module => {
+        if (!config.backgroundHttpMode) return true;
+
+        if (module.id === 'progression' || module.id === 'pokemon') {
+          return false;
+        }
+
+        if (
+          module.id === 'expeditions' &&
+          expeditionCycle().phase !== 'due'
+        ) {
+          return false;
+        }
+
+        return true;
+      })
       .map(module => {
         const anchor = navLinkForModule(module);
         if (!anchor) return null;
@@ -511,6 +527,15 @@ function moduleEnabled(moduleId) {
     const plan = [];
     const expeditionState = expeditionCycle();
     const navigation = navigationCandidates()[0] || null;
+
+    if (config.backgroundHttpMode && backgroundSweepDue()) {
+      plan.push({
+        name: 'background-http',
+        priority: 8850,
+        reason: 'observation GET silencieuse et actions POST directes',
+        run: runBackgroundAutomation,
+      });
+    }
 
     if (recentBotAction() && findClickable(
       ['confirmer', 'confirm', 'oui', 'yes', 'valider'],
