@@ -1281,21 +1281,9 @@
     }
 
     if (chance != null) {
-      score += chance * 1.6;
-      reasons.push(`+${Math.round(chance * 1.6)} chance ${chance}%`);
-
-      if (chance < config.minSuccessChance) {
-        score -= (config.minSuccessChance - chance) * 7;
-        reasons.push(`risque élevé (<${config.minSuccessChance}%)`);
-      }
-
-      if (chance < 30) {
-        score -= 500;
-        reasons.push('-500 chance critique');
-      }
-    } else {
-      score += 60;
-      reasons.push('+60 chance inconnue');
+      const encounterBonus = chance * 0.45;
+      score += encounterBonus;
+      reasons.push(`+${Math.round(encounterBonus)} potentiel rencontre ${chance}%`);
     }
 
     if (requiredLevel != null && pageContext.teamLevel != null) {
@@ -1421,7 +1409,7 @@
     if (config.strategy === 'progression') {
       const viableProgression = ranking
         .filter(item =>
-          (item.chance == null || item.chance >= config.minSuccessChance) &&
+          item.failureStreak < 2 &&
           (item.requiredLevel == null || item.teamLevel == null || item.teamLevel >= item.requiredLevel)
         )
         .sort((a, b) => {
