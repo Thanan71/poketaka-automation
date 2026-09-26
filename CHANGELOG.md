@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.8.0 - 2026-09-26
+
+- Ajout d'un moteur Smart Expedition qui couple le choix de mission et la composition d'équipe.
+- Nouveau module `src/features/expeditions/team.js`.
+- Mise en cache du roster réellement disponible depuis les pages de préparation.
+- Évaluation de la viabilité d'une mission à partir du niveau conseillé, des PV et des types.
+- Prise en compte des avantages offensifs et des résistances/faiblesses défensives.
+- Diversification automatique des types lorsque plusieurs Pokémon sont requis.
+- Validation du roster réel avant lancement d'une mission.
+- Repli automatique vers une mission plus facile lorsqu'aucune équipe viable n'est disponible.
+- Blocage temporaire des missions non viables afin d'éviter les boucles.
+- La progression de zone est désormais prioritaire sur le simple rendement durée/rencontre.
+- Le dashboard affiche l'équipe prévue par le planificateur.
+
+
 ## 0.7.1 - 2026-09-26
 
 - Correction du faux niveau d'équipe détecté sur le catalogue des expéditions.
