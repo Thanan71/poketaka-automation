@@ -24,6 +24,8 @@ function gymCycle() {
       blockedUntil: 0,
       lastCheckAt: 0,
       lastChallengeAt: 0,
+      challengeSubmittedDay: null,
+      completedDay: null,
     };
   }
   return state.gymCycle;
@@ -253,6 +255,9 @@ function leagueNeedsDailyCheck() {
   const gym = gymCycle();
   const today = localDayKey();
 
+  if (gym.completedDay === today) return false;
+  if (gym.challengeSubmittedDay === today && gym.phase === 'challenging') return false;
+
   if (gym.phase === 'blocked' && gym.blockedUntil && gym.blockedUntil > now()) {
     return false;
   }
@@ -267,6 +272,9 @@ function leagueNeedsDailyCheck() {
 
 function leagueAttentionReason() {
   const gym = gymCycle();
+  if (gym.completedDay === localDayKey()) {
+    return null;
+  }
   if (gym.availableToday === true) {
     return gym.arena
       ? `combat d’arène disponible: ${gym.arena}`
@@ -292,7 +300,10 @@ async function handleLeagueAutomation() {
     state.gymCycle = {
       ...gymCycle(),
       phase: 'result',
-      reason: 'Combat résolu — retour au Circuit pour actualiser la progression',
+      checkedDay: localDayKey(),
+      availableToday: false,
+      completedDay: localDayKey(),
+      reason: 'Combat résolu — combat quotidien consommé, retour au Circuit',
       lastCheckAt: now(),
     };
     saveState(state);
@@ -306,6 +317,17 @@ async function handleLeagueAutomation() {
     const dailyAvailable = leagueDailyStatus();
     const progress = parseGymProgress();
     const gym = availableGymContext();
+
+    if (gymCycle().completedDay === today) {
+      setGymCycle('done', {
+        checkedDay: today,
+        availableToday: false,
+        badges: progress.badges,
+        totalBadges: progress.totalBadges,
+        reason: 'Combat d’arène déjà résolu aujourd’hui',
+      });
+      return false;
+    }
 
     if (dailyAvailable === false) {
       setGymCycle('done', {
@@ -426,6 +448,7 @@ async function handleLeagueAutomation() {
       teamScore: assessment.plan.teamScore,
       reason: `Défi lancé avec ${assessment.plan.team.map(pokemon => pokemon.name).join(', ')}`,
       lastChallengeAt: now(),
+      challengeSubmittedDay: localDayKey(),
     };
     saveState(state);
     updatePanel();
