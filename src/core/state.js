@@ -41,6 +41,7 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
         lastStatus: null,
         lastError: null,
         lastSweepAt: 0,
+        observedPaths: {},
       },
       navIndex: 0,
       actions: 0,
