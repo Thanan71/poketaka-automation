@@ -15,6 +15,7 @@ const STORAGE_KEY = 'poketaka-automation:config';
     autoGyms: true,
     autoLevelPokemon: true,
     autoEvolvePokemon: true,
+    preserveEvolutionCandies: true,
     minStardustReserve: 500,
     pokemonProgressionScanMinutes: 45,
     minGymHpPercent: 70,
