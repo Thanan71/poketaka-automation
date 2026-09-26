@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.1 - 2026-09-26
+
+- Correction des sections repliables qui se refermaient à chaque rafraîchissement du dashboard.
+- L'état ouvert/fermé de "Modules surveillés" et "Réglages automatiques" est maintenant conservé pendant les mises à jour temps réel.
+
+
 ## 0.3.0 - 2026-09-26
 
 - Refonte complète du panneau Tampermonkey en tableau de bord compact.
