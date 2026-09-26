@@ -57,6 +57,15 @@ function elementText(el) {
     state.lastAction = actionName;
     state.actions += 1;
     markModuleAction(moduleFromLocation()?.id);
+    appendActionLog(
+      'info',
+      'dom',
+      actionName,
+      {
+        tag: el.tagName,
+        text: (el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 120),
+      }
+    );
     saveState(state);
     updatePanel();
 
