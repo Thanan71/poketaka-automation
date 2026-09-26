@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PokéTaka Automation
 // @namespace    https://github.com/Thanan71/poketaka-automation
-// @version      0.4.3
+// @version      0.7.0
 // @description  Assistant d'automatisation DOM pour PokéTaka : expéditions, récompenses, soins, serre et progression.
 // @author       Thanan71
 // @match        https://poketaka.fr/*
@@ -16,7 +16,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.4.3';
+  const VERSION = '0.7.0';
   const STORAGE_KEY = 'poketaka-automation:config';
   const STATE_KEY = 'poketaka-automation:state';
 
@@ -34,7 +34,14 @@
     strategy: 'progression',
     minSuccessChance: 55,
     avoidLongLowValue: true,
+    smartTeam: true,
+    minTeamHpPercent: 45,
     autoCapture: false,
+    smartCapture: true,
+    captureNewSpecies: true,
+    captureRare: true,
+    captureUnknownEncounters: false,
+    minBallReserve: 3,
     autoPlant: false,
     panelCollapsed: false,
     debug: true,
@@ -57,6 +64,27 @@
     'echanger', 'trade',
     'abandonner', 'abandon',
   ];
+
+  const TYPE_CHART = {
+    normal: { roche: 0.5, rock: 0.5, acier: 0.5, steel: 0.5, spectre: 0, ghost: 0 },
+    feu: { plante: 2, grass: 2, glace: 2, ice: 2, insecte: 2, bug: 2, acier: 2, steel: 2, feu: 0.5, eau: 0.5, water: 0.5, roche: 0.5, rock: 0.5, dragon: 0.5 },
+    eau: { feu: 2, sol: 2, ground: 2, roche: 2, rock: 2, eau: 0.5, plante: 0.5, grass: 0.5, dragon: 0.5 },
+    electrik: { eau: 2, water: 2, vol: 2, flying: 2, electrik: 0.5, plante: 0.5, grass: 0.5, dragon: 0.5, sol: 0, ground: 0 },
+    plante: { eau: 2, water: 2, sol: 2, ground: 2, roche: 2, rock: 2, feu: 0.5, plante: 0.5, poison: 0.5, vol: 0.5, flying: 0.5, insecte: 0.5, bug: 0.5, dragon: 0.5, acier: 0.5, steel: 0.5 },
+    glace: { plante: 2, grass: 2, sol: 2, ground: 2, vol: 2, flying: 2, dragon: 2, feu: 0.5, eau: 0.5, water: 0.5, glace: 0.5, acier: 0.5, steel: 0.5 },
+    combat: { normal: 2, glace: 2, roche: 2, rock: 2, tenebres: 2, dark: 2, acier: 2, steel: 2, poison: 0.5, vol: 0.5, flying: 0.5, psy: 0.5, psychic: 0.5, insecte: 0.5, bug: 0.5, fee: 0.5, fairy: 0.5, spectre: 0, ghost: 0 },
+    poison: { plante: 2, grass: 2, fee: 2, fairy: 2, poison: 0.5, sol: 0.5, ground: 0.5, roche: 0.5, rock: 0.5, spectre: 0.5, ghost: 0.5, acier: 0, steel: 0 },
+    sol: { feu: 2, electrik: 2, poison: 2, roche: 2, rock: 2, acier: 2, steel: 2, plante: 0.5, grass: 0.5, insecte: 0.5, bug: 0.5, vol: 0, flying: 0 },
+    vol: { plante: 2, grass: 2, combat: 2, insecte: 2, bug: 2, electrik: 0.5, roche: 0.5, rock: 0.5, acier: 0.5, steel: 0.5 },
+    psy: { combat: 2, poison: 2, psy: 0.5, psychic: 0.5, acier: 0.5, steel: 0.5, tenebres: 0, dark: 0 },
+    insecte: { plante: 2, grass: 2, psy: 2, psychic: 2, tenebres: 2, dark: 2, feu: 0.5, combat: 0.5, poison: 0.5, vol: 0.5, flying: 0.5, spectre: 0.5, ghost: 0.5, acier: 0.5, steel: 0.5, fee: 0.5, fairy: 0.5 },
+    roche: { feu: 2, glace: 2, vol: 2, flying: 2, insecte: 2, bug: 2, combat: 0.5, sol: 0.5, ground: 0.5, acier: 0.5, steel: 0.5 },
+    spectre: { psy: 2, psychic: 2, spectre: 2, ghost: 2, tenebres: 0.5, dark: 0.5, normal: 0 },
+    dragon: { dragon: 2, acier: 0.5, steel: 0.5, fee: 0, fairy: 0 },
+    tenebres: { psy: 2, psychic: 2, spectre: 2, ghost: 2, combat: 0.5, tenebres: 0.5, dark: 0.5, fee: 0.5, fairy: 0.5 },
+    acier: { glace: 2, roche: 2, rock: 2, fee: 2, fairy: 2, feu: 0.5, eau: 0.5, water: 0.5, electrik: 0.5, acier: 0.5, steel: 0.5 },
+    fee: { combat: 2, dragon: 2, tenebres: 2, dark: 2, feu: 0.5, poison: 0.5, acier: 0.5, steel: 0.5 },
+  };
 
   const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
   const now = () => Date.now();
@@ -97,6 +125,21 @@
         resultUrl: null,
         dueAt: null,
         lastTransitionAt: 0,
+      },
+      smartTeam: {
+        lastSelection: [],
+        lastMissionTypes: [],
+        lastRecommendedLevel: null,
+      },
+      captureDecision: {
+        action: 'none',
+        reason: null,
+        species: null,
+      },
+      orchestrator: {
+        lastDecision: null,
+        lastReason: null,
+        lastPriority: 0,
       },
       ...(GM_getValue(STATE_KEY, {}) || {}),
     };
