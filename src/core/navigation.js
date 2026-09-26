@@ -423,13 +423,24 @@ function moduleEnabled(moduleId) {
       .filter(module => {
         if (!config.backgroundHttpMode) return true;
 
-        if (module.id === 'progression' || module.id === 'pokemon') {
+        if (
+          module.id === 'progression' &&
+          backgroundRouteFresh('/league')
+        ) {
+          return false;
+        }
+
+        if (
+          module.id === 'pokemon' &&
+          backgroundRouteFresh('/collection')
+        ) {
           return false;
         }
 
         if (
           module.id === 'expeditions' &&
-          expeditionCycle().phase !== 'due'
+          expeditionCycle().phase !== 'due' &&
+          backgroundRouteFresh('/expeditions')
         ) {
           return false;
         }
