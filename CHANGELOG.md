@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.1 - 2026-09-26
+
+- Correction du faux niveau d'équipe détecté sur le catalogue des expéditions.
+- Le texte "Niveau conseillé" d'une destination n'est plus interprété comme le niveau réel de l'équipe.
+- Le catalogue ne filtre plus une destination à partir d'un niveau d'équipe supposé.
+- Le niveau réel est évalué uniquement sur la page de préparation à partir des Pokémon effectivement disponibles.
+- En mode progression, la destination disponible la plus avancée reste prioritaire tant qu'elle n'a pas une série d'échecs bloquante.
+
+
 ## 0.7.0 - 2026-09-26
 
 - Ajout d'un orchestrateur global qui priorise les actions utiles à chaque cycle.
