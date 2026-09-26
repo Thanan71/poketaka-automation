@@ -373,7 +373,9 @@ async function openNextPokemonProgressionTarget() {
     reason: `Inspection de ${target.name} niveau ${target.level}`,
   });
 
-  return clickElement(target.card, `Progression Pokémon: inspecter ${target.name}`);
+  return config.directHttpActions
+    ? navigateDirectly(target.href, `Progression Pokémon: inspecter ${target.name}`)
+    : clickElement(target.card, `Progression Pokémon: inspecter ${target.name}`);
 }
 
 async function handlePokemonProfileProgression() {
@@ -385,9 +387,10 @@ async function handlePokemonProfileProgression() {
 
   if (alreadyScanned) {
     const back = collectionReturnLink();
-    return back
-      ? clickElement(back, 'Progression Pokémon: retour à la collection')
-      : false;
+    if (!back) return false;
+    return config.directHttpActions
+      ? navigateDirectly(back.href, 'Progression Pokémon: retour à la collection')
+      : clickElement(back, 'Progression Pokémon: retour à la collection');
   }
 
   if (context.inActivity) {
@@ -401,9 +404,10 @@ async function handlePokemonProfileProgression() {
     });
 
     const back = collectionReturnLink();
-    return back
-      ? clickElement(back, `Progression Pokémon: ${context.name} occupé`)
-      : false;
+    if (!back) return false;
+    return config.directHttpActions
+      ? navigateDirectly(back.href, `Progression Pokémon: ${context.name} occupé`)
+      : clickElement(back, `Progression Pokémon: ${context.name} occupé`);
   }
 
   const evolutions = pokemonEvolutionOptions();
@@ -415,6 +419,25 @@ async function handlePokemonProfileProgression() {
     affordableEvolutions.length === 1
   ) {
     const evolution = affordableEvolutions[0];
+
+    if (config.directHttpActions) {
+      markPokemonScanned(context.id, {
+        phase: 'evolving',
+        targetId: context.id,
+        targetName: context.name,
+        targetLevel: context.level,
+        action: 'evolve',
+        reason: evolution.reason,
+        lastEvolutionAt: now(),
+      });
+
+      return submitObservedForm(
+        evolution.form,
+        `Évolution HTTP: ${context.name} → ${evolution.target || 'évolution'}`,
+        { expectedKind: 'pokemon_evolve' }
+      );
+    }
+
     const dialog = document.querySelector('#pokemon-evolution-dialog');
 
     if (!dialog?.open) {
@@ -495,6 +518,24 @@ async function handlePokemonProfileProgression() {
     levelConsumesCandy;
 
   if (config.autoLevelPokemon && level.available && !preserveCandyForEvolution) {
+    if (config.directHttpActions) {
+      markPokemonScanned(context.id, {
+        phase: 'leveling',
+        targetId: context.id,
+        targetName: context.name,
+        targetLevel: level.targetLevel,
+        action: 'level_up',
+        reason: level.reason,
+        lastUpgradeAt: now(),
+      });
+
+      return submitObservedForm(
+        level.form,
+        `Renforcement HTTP: ${context.name} → niveau ${level.targetLevel}`,
+        { expectedKind: 'pokemon_level_up' }
+      );
+    }
+
     const dialog = document.querySelector('#pokemon-level-dialog');
 
     if (!dialog?.open) {
@@ -555,9 +596,10 @@ async function handlePokemonProfileProgression() {
   });
 
   const back = collectionReturnLink();
-  return back
-    ? clickElement(back, `Progression Pokémon: ${context.name} analysé`)
-    : false;
+  if (!back) return false;
+  return config.directHttpActions
+    ? navigateDirectly(back.href, `Progression Pokémon: ${context.name} analysé`)
+    : clickElement(back, `Progression Pokémon: ${context.name} analysé`);
 }
 
 async function handlePokemonProgression() {
