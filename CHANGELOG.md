@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.14 - 2026-09-26
+
+- Correction de l'ordre de repli lorsqu'une mission ciblée par le Goal Planner échoue au contrôle réel de l'équipe.
+- Si la mission cible est jugée non viable, le bot tente désormais d'abord une progression Pokémon sûre avant de lancer immédiatement une mission plus facile.
+- Le farming opportuniste reste disponible si aucun renforcement sûr n'est possible.
+- Les missions écartées journalisent maintenant le niveau conseillé, la taille d'équipe requise et les meilleurs candidats avec niveau, score et viabilité.
+- Ajout de tests garantissant que le renforcement de la mission cible précède le repli vers une expédition facile.
+
 ## 0.9.13 - 2026-09-26
 
 - Correction du classement des expéditions lorsqu'il est exécuté sur le DOM téléchargé par le mode GET silencieux.
