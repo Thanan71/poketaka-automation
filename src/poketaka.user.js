@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PokéTaka Automation
 // @namespace    https://github.com/Thanan71/poketaka-automation
-// @version      0.2.0
+// @version      0.2.1
 // @description  Assistant d'automatisation DOM pour PokéTaka : expéditions, récompenses, soins, serre et progression.
 // @author       Thanan71
 // @match        https://poketaka.fr/*
@@ -16,7 +16,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.2.0';
+  const VERSION = '0.2.1';
   const STORAGE_KEY = 'poketaka-automation:config';
   const STATE_KEY = 'poketaka-automation:state';
 
@@ -39,13 +39,13 @@
     debug: true,
   };
 
-  const NAV_TARGETS = [
-    ['expedition', 'expeditions', 'exploration'],
-    ['centre pokemon', 'pokemon center', 'soins', 'heal'],
-    ['serre', 'greenhouse'],
-    ['incubateur', 'incubator', 'oeufs', 'eggs', 'fossiles', 'fossils'],
-    ['pension', 'daycare', 'elevage', 'breeding'],
-    ['arene', 'gym', 'ligue', 'league'],
+  const MODULES = [
+    { id: 'expeditions', label: 'Expéditions', keywords: ['expedition', 'expeditions', 'exploration'] },
+    { id: 'healing', label: 'Soins', keywords: ['centre pokemon', 'pokemon center', 'soins', 'heal'] },
+    { id: 'greenhouse', label: 'Serre', keywords: ['serre', 'greenhouse'] },
+    { id: 'incubator', label: 'Incubateur', keywords: ['incubateur', 'incubator', 'oeufs', 'eggs', 'fossiles', 'fossils'] },
+    { id: 'breeding', label: 'Pension', keywords: ['pension', 'daycare', 'elevage', 'breeding'] },
+    { id: 'progression', label: 'Progression', keywords: ['arene', 'gym', 'ligue', 'league'] },
   ];
 
   const UNSAFE_WORDS = [
@@ -86,6 +86,8 @@
       actions: 0,
       selectedExpedition: null,
       selectedExpeditionScore: null,
+      moduleStatus: {},
+      lastNavigationAt: 0,
       ...(GM_getValue(STATE_KEY, {}) || {}),
     };
   }
@@ -161,6 +163,7 @@
     state.lastBotClickAt = now();
     state.lastAction = actionName;
     state.actions += 1;
+    markModuleAction(moduleFromLocation()?.id);
     saveState(state);
     updatePanel();
 
@@ -618,35 +621,176 @@
     return button ? clickElement(button, 'Progression') : false;
   }
 
-  async function navigateToNextModule() {
-    const anchors = [...document.querySelectorAll('a[href]')]
+  function moduleEnabled(moduleId) {
+    const rules = {
+      expeditions: config.autoClaimExpeditions || config.autoStartExpeditions,
+      healing: config.autoHeal,
+      greenhouse: config.autoHarvest || config.autoPlant,
+      incubator: config.autoIncubatorClaim,
+      breeding: config.autoBreedingClaim,
+      progression: config.autoProgression,
+    };
+    return Boolean(rules[moduleId]);
+  }
+
+  function moduleFromLocation() {
+    const haystack = normalizeText(location.pathname + ' ' + location.search);
+    return MODULES.find(module =>
+      module.keywords.some(keyword => haystack.includes(normalizeText(keyword)))
+    ) || null;
+  }
+
+  function parseCountdownMs(text) {
+    const normalized = normalizeText(text);
+    const clock = normalized.match(/\b(\d{1,2}):(\d{2})(?::(\d{2}))?\b/);
+    if (clock) {
+      const first = Number(clock[1]);
+      const second = Number(clock[2]);
+      const third = clock[3] == null ? null : Number(clock[3]);
+      const seconds = third == null
+        ? first * 60 + second
+        : first * 3600 + second * 60 + third;
+      if (seconds > 0) return seconds * 1000;
+    }
+
+    let seconds = 0;
+    let found = false;
+    const hours = normalized.match(/(\d+(?:[.,]\d+)?)\s*(?:h|heure|heures|hour|hours)\b/);
+    const minutes = normalized.match(/(\d+(?:[.,]\d+)?)\s*(?:min|minute|minutes)\b/);
+    const secs = normalized.match(/(\d+(?:[.,]\d+)?)\s*(?:s|sec|seconde|secondes|second|seconds)\b/);
+    if (hours) { seconds += (parseNumber(hours[1]) || 0) * 3600; found = true; }
+    if (minutes) { seconds += (parseNumber(minutes[1]) || 0) * 60; found = true; }
+    if (secs) { seconds += parseNumber(secs[1]) || 0; found = true; }
+    return found && seconds > 0 ? seconds * 1000 : null;
+  }
+
+  function modulePageText() {
+    const main = document.querySelector('main, [role="main"], #content, .content');
+    return normalizeText((main || document.body)?.innerText || '');
+  }
+
+  function recordCurrentModuleStatus() {
+    const current = moduleFromLocation();
+    if (!current) return;
+
+    const text = modulePageText();
+    const countdownMs = parseCountdownMs(text);
+    const previous = state.moduleStatus?.[current.id] || {};
+
+    state.moduleStatus = {
+      ...(state.moduleStatus || {}),
+      [current.id]: {
+        ...previous,
+        lastVisitedAt: now(),
+        nextDueAt: countdownMs ? now() + countdownMs : previous.nextDueAt || null,
+      },
+    };
+    saveState(state);
+  }
+
+  function markModuleAction(moduleId) {
+    if (!moduleId) return;
+    const previous = state.moduleStatus?.[moduleId] || {};
+    state.moduleStatus = {
+      ...(state.moduleStatus || {}),
+      [moduleId]: {
+        ...previous,
+        lastActionAt: now(),
+      },
+    };
+    saveState(state);
+  }
+
+  function navLinkForModule(module) {
+    return [...document.querySelectorAll('a[href]')]
       .filter(isVisible)
       .filter(a => {
         try {
           const url = new URL(a.href, location.href);
-          return url.origin === location.origin && url.pathname !== location.pathname;
+          if (url.origin !== location.origin || url.pathname === location.pathname) return false;
+          const haystack = normalizeText(`${elementText(a)} ${url.pathname}`);
+          return module.keywords.some(keyword => haystack.includes(normalizeText(keyword)));
         } catch {
           return false;
         }
-      });
+      })[0] || null;
+  }
 
-    for (let offset = 0; offset < NAV_TARGETS.length; offset += 1) {
-      const index = (state.navIndex + offset) % NAV_TARGETS.length;
-      const keywords = NAV_TARGETS[index].map(normalizeText);
-      const anchor = anchors.find(a => {
-        const text = elementText(a);
-        const href = normalizeText(a.getAttribute('href') || '');
-        return keywords.some(k => text.includes(k) || href.includes(k));
-      });
-
-      if (anchor) {
-        state.navIndex = (index + 1) % NAV_TARGETS.length;
-        saveState(state);
-        return clickElement(anchor, `Navigation: ${NAV_TARGETS[index][0]}`);
-      }
+  function linkHasReadySignal(anchor) {
+    if (!anchor) return false;
+    const text = elementText(anchor);
+    if (/\b(pret|prete|ready|termine|terminee|finished|complete|recolter|harvest|reclamer|claim)\b/.test(text)) {
+      return true;
     }
 
-    return false;
+    const badges = [...anchor.querySelectorAll(
+      '.badge, [class*="badge"], [class*="counter"], [class*="notification"], [aria-label*="notification"]'
+    )].filter(isVisible);
+
+    return badges.some(badge => {
+      const value = normalizeText(badge.textContent || badge.getAttribute('aria-label') || '');
+      const number = parseInt(value, 10);
+      return value.includes('!') || (Number.isFinite(number) && number > 0);
+    });
+  }
+
+  function pageIndicatesHealingNeeded() {
+    const text = modulePageText();
+    return /\bko\b|hors combat|fainted|0\s*\/\s*\d+\s*(?:pv|hp)/i.test(text);
+  }
+
+  function navigationCandidates() {
+    const current = moduleFromLocation();
+    const timestamp = now();
+
+    return MODULES
+      .filter(module => moduleEnabled(module.id))
+      .filter(module => module.id !== current?.id)
+      .map(module => {
+        const anchor = navLinkForModule(module);
+        if (!anchor) return null;
+
+        const status = state.moduleStatus?.[module.id] || {};
+        let score = 0;
+        const reasons = [];
+
+        if (linkHasReadySignal(anchor)) {
+          score += 1000;
+          reasons.push('indicateur prêt dans la navigation');
+        }
+
+        if (status.nextDueAt && timestamp >= status.nextDueAt) {
+          const overdueMinutes = Math.floor((timestamp - status.nextDueAt) / 60000);
+          score += 900 + Math.min(100, overdueMinutes);
+          reasons.push('timer mémorisé arrivé à échéance');
+        }
+
+        if (module.id === 'healing' && pageIndicatesHealingNeeded()) {
+          score += 950;
+          reasons.push('équipe détectée KO/blessée');
+        }
+
+        return score > 0 ? { module, anchor, score, reasons } : null;
+      })
+      .filter(Boolean)
+      .sort((a, b) => b.score - a.score);
+  }
+
+  async function navigateWhenNeeded() {
+    // Évite les rebonds de navigation après un changement de page.
+    if (now() - (state.lastNavigationAt || 0) < 8000) return false;
+
+    const candidates = navigationCandidates();
+    if (!candidates.length) {
+      log('Navigation: aucune autre page nécessaire.');
+      return false;
+    }
+
+    const target = candidates[0];
+    state.lastNavigationAt = now();
+    saveState(state);
+    log('Navigation nécessaire:', target.module.id, target.reasons);
+    return clickElement(target.anchor, `Navigation nécessaire: ${target.module.label}`);
   }
 
   async function cycle() {
@@ -659,6 +803,8 @@
         return;
       }
 
+      recordCurrentModuleStatus();
+
       const actions = [
         handleConfirmation,
         claimExpedition,
@@ -670,7 +816,7 @@
         autoProgression,
         startExpedition,
         plantGreenhouse,
-        navigateToNextModule,
+        navigateWhenNeeded,
       ];
 
       for (const action of actions) {
@@ -681,7 +827,7 @@
         }
       }
 
-      state.lastAction = 'Aucune action disponible';
+      state.lastAction = 'En attente — aucune action nécessaire';
       saveState(state);
       updatePanel();
     } finally {
