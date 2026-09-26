@@ -1947,8 +1947,115 @@
     return clickElement(target.anchor, `Navigation nécessaire: ${target.module.label}`);
   }
 
-  async function cycle() {
-    if (!config.enabled || running) return;
+  function orchestratorPlan() {
+    const plan = [];
+    const expeditionState = expeditionCycle();
+    const navigation = navigationCandidates()[0] || null;
+
+    if (recentBotAction() && findClickable(
+      ['confirmer', 'confirm', 'oui', 'yes', 'valider'],
+      document,
+      { exclude: ['annuler', 'cancel'] }
+    )) {
+      plan.push({
+        name: 'confirmation',
+        priority: 10000,
+        reason: 'confirmation d’une action du bot',
+        run: handleConfirmation,
+      });
+    }
+
+    if (
+      isExpeditionResultPage() ||
+      isExpeditionPreparePage() ||
+      isExpeditionIndexPage() ||
+      ['due', 'ready_to_start', 'preparing', 'starting'].includes(expeditionState.phase)
+    ) {
+      let priority = 7200;
+      let reason = 'cycle expédition';
+
+      if (isExpeditionResultPage() || expeditionState.phase === 'due') {
+        priority = 9600;
+        reason = 'résultat ou récompense d’expédition prioritaire';
+      } else if (isExpeditionPreparePage()) {
+        priority = 9000;
+        reason = 'composition/lancement d’équipe en cours';
+      } else if (expeditionState.phase === 'ready_to_start') {
+        priority = 8200;
+        reason = 'emplacement libre à utiliser';
+      }
+
+      plan.push({
+        name: 'expedition',
+        priority,
+        reason,
+        run: handleExpeditionCycle,
+      });
+    }
+
+    plan.push(
+      {
+        name: 'heal',
+        priority: 7800,
+        reason: 'soigner avant de poursuivre les activités',
+        run: healTeam,
+      },
+      {
+        name: 'incubator',
+        priority: 7400,
+        reason: 'récupération incubateur disponible',
+        run: claimIncubator,
+      },
+      {
+        name: 'breeding',
+        priority: 7300,
+        reason: 'récupération pension disponible',
+        run: claimBreeding,
+      },
+      {
+        name: 'greenhouse-harvest',
+        priority: 7100,
+        reason: 'récolte prête',
+        run: harvestGreenhouse,
+      },
+      {
+        name: 'progression',
+        priority: 5600,
+        reason: 'action explicite de progression disponible',
+        run: autoProgression,
+      },
+      {
+        name: 'greenhouse-plant',
+        priority: 3500,
+        reason: 'replantation optionnelle',
+        run: plantGreenhouse,
+      },
+    );
+
+    if (navigation) {
+      plan.push({
+        name: `navigation:${navigation.module.id}`,
+        priority: 5000 + navigation.score,
+        reason: navigation.reasons.join(', '),
+        run: navigateWhenNeeded,
+      });
+    }
+
+    return plan.sort((a, b) => b.priority - a.priority);
+  }
+
+  function recordOrchestratorDecision(candidate) {
+    state.orchestrator = {
+      lastDecision: candidate?.name || 'wait',
+      lastReason: candidate?.reason || 'aucune action nécessaire',
+      lastPriority: candidate?.priority || 0,
+    };
+    saveState(state);
+    updatePanel();
+  }
+
+  async function cycle(force = false) {
+    if ((!config.enabled && !force) || running) return;
     running = true;
 
     try {
@@ -1958,27 +2065,22 @@
       }
 
       recordCurrentModuleStatus();
+      const plan = orchestratorPlan();
 
-      const actions = [
-        handleConfirmation,
-        handleExpeditionCycle,
-        claimIncubator,
-        claimBreeding,
-        harvestGreenhouse,
-        healTeam,
-        autoProgression,
-        plantGreenhouse,
-        navigateWhenNeeded,
-      ];
-
-      for (const action of actions) {
+      for (const candidate of plan) {
         try {
-          if (await action()) return;
+          const acted = await candidate.run();
+          if (acted) {
+            recordOrchestratorDecision(candidate);
+            log('Orchestrateur:', candidate.name, candidate.priority, candidate.reason);
+            return;
+          }
         } catch (error) {
-          console.error('[PokéTaka Auto] Erreur action', action.name, error);
+          console.error('[PokéTaka Auto] Erreur orchestrateur', candidate.name, error);
         }
       }
 
+      recordOrchestratorDecision(null);
       state.lastAction = 'En attente — aucune action nécessaire';
       saveState(state);
       updatePanel();
@@ -2371,7 +2473,7 @@
       }
 
       if (action === 'run') {
-        cycle();
+        cycle(true);
         return;
       }
 
@@ -2528,7 +2630,7 @@
   }
 
   GM_registerMenuCommand('Activer / désactiver PokéTaka Automation', () => setEnabled(!config.enabled));
-  GM_registerMenuCommand('Exécuter un cycle maintenant', () => cycle());
+  GM_registerMenuCommand('Exécuter un cycle maintenant', () => cycle(true));
   GM_registerMenuCommand('Diagnostiquer le timer de la page', () => {
     const current = moduleFromLocation();
     if (!current) {
