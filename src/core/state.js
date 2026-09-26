@@ -43,6 +43,20 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
         lastMissionTypes: [],
         lastRecommendedLevel: null,
       },
+      rosterSnapshot: {
+        capturedAt: 0,
+        pokemon: [],
+      },
+      expeditionBlocks: {},
+      expeditionPlan: {
+        title: null,
+        team: [],
+        teamIds: [],
+        teamScore: null,
+        viability: 'unknown',
+        reason: null,
+        updatedAt: 0,
+      },
       captureDecision: {
         action: 'none',
         reason: null,
