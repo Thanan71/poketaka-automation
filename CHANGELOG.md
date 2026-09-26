@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.1 - 2026-09-26
+
+- Suppression de la navigation cyclique permanente entre les modules.
+- Navigation vers une autre page uniquement lorsqu'un indicateur prêt/terminé est visible, qu'un timer mémorisé arrive à échéance ou que l'équipe semble avoir besoin de soins.
+- Mémorisation des échéances détectées dans les pages à partir des compteurs visibles.
+- Anti-rebond de navigation pendant 8 secondes.
+- Nettoyage des anciens timers dès qu'une page est inspectée sans compte à rebours actif.
+
+
 ## 0.2.0 - 2026-09-26
 
 - Remplacement du choix "dernier bouton disponible" par un moteur de classement.
