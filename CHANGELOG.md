@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.4.0 - 2026-09-26
+
+- Ajout d'une machine d'état persistante pour le cycle complet des expéditions.
+- Détection de l'expédition active via `.mission-slot-card--occupied`.
+- Mémorisation du titre, de l'URL de résultat et de l'heure de fin.
+- Ouverture automatique de "Suivre l'expédition" lorsque le timer arrive à échéance.
+- Gestion dédiée des pages `/expeditions/results/*`.
+- Récupération automatique des récompenses lorsqu'un bouton sûr est disponible.
+- Blocage volontaire sur une capture en attente si l'autocapture est désactivée.
+- Retour automatique vers la page Expéditions après récupération.
+- Relance automatique d'une nouvelle expédition lorsque le slot est libre.
+- Prise en charge du vrai bouton "Préparer l'expédition".
+- Sélection basique d'une équipe disponible si un sélecteur explicite est présent.
+- Affichage de l'état du cycle dans le dashboard.
+
+
 ## 0.3.3 - 2026-09-26
 
 - Adaptation du timer d'expédition au HTML réel de PokéTaka.
