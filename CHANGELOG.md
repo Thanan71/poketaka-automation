@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.0 - 2026-09-26
+
+- Remplacement du choix "dernier bouton disponible" par un moteur de classement.
+- Score basé sur progression de zone, chance de réussite, niveau requis, durée et récompenses visibles.
+- Prise en compte de l'énergie visible lorsqu'un coût est affiché.
+- Bonus aux nouvelles zones et pénalité au farming déjà terminé.
+- Seuil de risque configurable avec pénalité forte sous 30 % de réussite.
+- Affichage de la cible et du score dans le panneau.
+- Commande Tampermonkey "Afficher le classement des expéditions" pour diagnostiquer les décisions.
+
+
 ## 0.1.0 - 2026-09-26
 
 - Première version du userscript.
