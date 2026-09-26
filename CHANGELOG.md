@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.9.0 - 2026-09-26
+
+- Ajout d'un snapshot global persistant du compte.
+- Lecture directe du niveau dresseur et du nombre d'espèces capturées depuis la vue d'ensemble des expéditions.
+- Mémorisation des expéditions terminées observées.
+- Analyse des destinations verrouillées et de leurs conditions : niveau, espèces, badges et expédition précédente.
+- Analyse des Arènes verrouillées et de leurs dépendances d'expédition/badge.
+- Nouveau Goal Planner qui produit un objectif principal, une étape suivante, des blocages et un niveau de confiance.
+- Le planner privilégie automatiquement les soins lorsqu'ils bloquent un combat d'Arène.
+- Le planner peut cibler une expédition précise lorsqu'elle est requise pour la progression.
+- Lorsque le niveau dresseur bloque une destination, les expéditions deviennent l'objectif de progression.
+- Lorsque le nombre d'espèces bloque une destination, le bot privilégie les missions à forte chance de rencontre.
+- Les priorités de navigation et de l'orchestrateur sont maintenant influencées par l'objectif global.
+- Nouvelle carte "Objectif global" dans le panel avec étape suivante, métriques du compte et blocages.
+- Ajout de tests CI couvrant les principaux scénarios du Goal Planner.
+- Correction Arènes : après soumission d'un combat quotidien, aucune nouvelle tentative automatique n'est autorisée le même jour.
+- Une page de résultat d'Arène marque immédiatement le combat quotidien comme consommé, même sans lien de retour vers le Circuit.
+
+
 ## 0.8.7 - 2026-09-26
 
 - Automatisation du Circuit des Arènes et du combat quotidien.
