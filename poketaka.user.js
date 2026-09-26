@@ -356,19 +356,241 @@
       }) || null;
   }
 
-  function resultPageHasPendingCapture() {
-    return Boolean(
+  function parseOptionalBoolean(value) {
+    if (value == null || value === '') return null;
+    const normalized = normalizeText(value);
+    if (['1', 'true', 'yes', 'oui', 'new', 'owned', 'captured'].includes(normalized)) return true;
+    if (['0', 'false', 'no', 'non', 'unknown'].includes(normalized)) return false;
+    return null;
+  }
+
+  function resultEncounterRoot() {
+    const selectors = [
+      '[data-encounter-pokemon]',
+      '[data-capture-encounter]',
+      '[data-pokemon-encounter]',
+      '.encounter-card',
+      '[class*="encounter"]',
+    ];
+
+    const direct = document.querySelector(selectors.join(','));
+    if (direct) return direct;
+
+    const button = findClickable([
+      'capturer',
+      'lancer pokeball',
+      'lancer une pokeball',
+      'throw pokeball',
+      'fuir',
+      'run away',
+    ]);
+
+    return button?.closest('article, section, .card, div') || null;
+  }
+
+  function readBallReserve() {
+    const explicit = [...document.querySelectorAll(
+      '[data-ball-count], [data-item-code*="ball" i], [data-item-name*="ball" i]'
+    )];
+
+    for (const element of explicit) {
+      const values = [
+        element.getAttribute('data-ball-count'),
+        element.getAttribute('data-quantity'),
+        element.getAttribute('data-count'),
+        element.textContent,
+      ];
+
+      for (const value of values) {
+        const match = String(value || '').match(/\d+/);
+        if (match) return Number(match[0]);
+      }
+    }
+
+    const pageText = normalizeText(document.body?.innerText || '');
+    const match = pageText.match(/(?:poke ?ball|super ?ball|hyper ?ball|ball)[^\d]{0,15}(\d+)/i);
+    return match ? Number(match[1]) : null;
+  }
+
+  function captureContext() {
+    const root = resultEncounterRoot();
+    if (!root) return null;
+
+    const text = normalizeText(root.innerText || root.textContent || '');
+    const captureButton = findClickable([
+      'capturer',
+      'capture',
+      'lancer pokeball',
+      'lancer une pokeball',
+      'throw pokeball',
+    ], root, { exclude: ['chance de capture', 'taux de capture'] }) ||
       findClickable([
         'capturer',
         'lancer pokeball',
         'lancer une pokeball',
         'throw pokeball',
+      ]);
+
+    const skipButton = findClickable([
+      'fuir',
+      'ignorer',
+      'passer',
+      'continuer sans capturer',
+      'laisser partir',
+      'run away',
+      'skip',
+      'leave',
+    ], root) ||
+      findClickable([
         'fuir',
+        'continuer sans capturer',
+        'laisser partir',
         'run away',
-      ], document, {
-        exclude: ['historique', 'history', 'chance de capture'],
-      })
+      ]);
+
+    const species =
+      root.getAttribute('data-pokemon-name') ||
+      root.getAttribute('data-species-name') ||
+      root.querySelector('[data-pokemon-name]')?.getAttribute('data-pokemon-name') ||
+      root.querySelector('h1, h2, h3, strong')?.textContent?.trim() ||
+      'Pokémon rencontré';
+
+    let isNew =
+      parseOptionalBoolean(root.getAttribute('data-new-species')) ??
+      parseOptionalBoolean(root.getAttribute('data-new'));
+
+    const owned =
+      parseOptionalBoolean(root.getAttribute('data-owned')) ??
+      parseOptionalBoolean(root.getAttribute('data-captured'));
+
+    if (isNew == null && owned != null) isNew = !owned;
+    if (isNew == null && /nouvelle espece|premiere capture|jamais capture|non capture|new species|first capture/.test(text)) {
+      isNew = true;
+    }
+    if (isNew == null && /deja capture|deja possede|already caught|already owned/.test(text)) {
+      isNew = false;
+    }
+
+    const rarity =
+      normalizeText(root.getAttribute('data-rarity') || '') ||
+      (text.match(/\b(commun|peu commun|rare|epique|legendaire|mythique|common|uncommon|epic|legendary|mythic)\b/)?.[1] || '');
+
+    const ivRaw =
+      root.getAttribute('data-iv-total') ||
+      root.getAttribute('data-iv-score') ||
+      text.match(/(?:iv|ivs)[^\d]{0,12}(\d+(?:[.,]\d+)?)/i)?.[1];
+
+    return {
+      root,
+      captureButton,
+      skipButton,
+      species: String(species).trim(),
+      isNew,
+      rarity,
+      ivScore: parseNumber(ivRaw),
+      ballReserve: readBallReserve(),
+      text,
+    };
+  }
+
+  function decideCapture(context) {
+    if (!context?.captureButton) {
+      return { action: 'none', reason: 'Aucun bouton de capture visible' };
+    }
+
+    if (!config.autoCapture) {
+      return { action: 'manual', reason: 'Captures automatiques désactivées' };
+    }
+
+    if (
+      context.ballReserve != null &&
+      context.ballReserve <= config.minBallReserve
+    ) {
+      return {
+        action: 'skip',
+        reason: `Réserve de Balls protégée (${context.ballReserve} ≤ ${config.minBallReserve})`,
+      };
+    }
+
+    if (!config.smartCapture) {
+      return { action: 'capture', reason: 'Mode capture simple' };
+    }
+
+    if (config.captureNewSpecies && context.isNew === true) {
+      return { action: 'capture', reason: 'Nouvelle espèce' };
+    }
+
+    if (
+      config.captureRare &&
+      /rare|epique|legendaire|mythique|epic|legendary|mythic/.test(context.rarity)
+    ) {
+      return { action: 'capture', reason: `Rareté: ${context.rarity}` };
+    }
+
+    if (
+      context.ivScore != null &&
+      context.ivScore >= config.minCaptureIvScore &&
+      context.ivScore <= 100
+    ) {
+      return {
+        action: 'capture',
+        reason: `IV ${context.ivScore} ≥ ${config.minCaptureIvScore}`,
+      };
+    }
+
+    if (config.captureUnknownEncounters && context.isNew == null) {
+      return { action: 'capture', reason: 'Rencontre inconnue autorisée' };
+    }
+
+    return {
+      action: context.skipButton ? 'skip' : 'manual',
+      reason: context.isNew === false
+        ? 'Doublon sans critère prioritaire'
+        : 'Informations insuffisantes pour consommer une Ball',
+    };
+  }
+
+  function resultPageHasPendingCapture() {
+    const context = captureContext();
+    return Boolean(context?.captureButton || context?.skipButton);
+  }
+
+  function recordExpeditionOutcome() {
+    if (!isExpeditionResultPage()) return;
+    if (state.lastRecordedResultUrl === location.pathname) return;
+
+    const text = normalizeText(document.body?.innerText || '');
+    const failure = /echec|echouee|echoue|defaite|failed|failure|lost/.test(text);
+    const success = /reussite|reussie|victoire|success|completed|terminee avec succes/.test(text);
+
+    if (!failure && !success) return;
+
+    const title = normalizeText(
+      document.querySelector('.page-header h1, main h1, main h2')?.textContent ||
+      expeditionCycle().title ||
+      'expedition'
     );
+
+    const previous = state.expeditionStats?.[title] || {
+      attempts: 0,
+      successes: 0,
+      failures: 0,
+      failureStreak: 0,
+    };
+
+    state.expeditionStats = {
+      ...(state.expeditionStats || {}),
+      [title]: {
+        attempts: previous.attempts + 1,
+        successes: previous.successes + (success && !failure ? 1 : 0),
+        failures: previous.failures + (failure ? 1 : 0),
+        failureStreak: failure ? previous.failureStreak + 1 : 0,
+        lastOutcome: failure ? 'failure' : 'success',
+        lastOutcomeAt: now(),
+      },
+    };
+    state.lastRecordedResultUrl = location.pathname;
+    saveState(state);
   }
 
   function resultPageLooksResolved() {
