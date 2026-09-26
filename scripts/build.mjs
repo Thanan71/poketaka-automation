@@ -15,6 +15,7 @@ const MODULES = [
   'src/planner/goals.js',
   'src/features/pokemon/progression.js',
   'src/features/expeditions/capture.js',
+  'src/features/expeditions/result.js',
   'src/features/expeditions/cycle.js',
   'src/features/activities.js',
   'src/features/expeditions/catalog.js',
