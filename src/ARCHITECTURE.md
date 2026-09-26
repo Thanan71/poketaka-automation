@@ -8,6 +8,7 @@ La logique métier ne doit plus y être ajoutée.
 - `src/core/config.js` — configuration, constantes et table des types.
 - `src/core/state.js` — état persistant et primitives communes.
 - `src/core/dom.js` — détection et clics DOM sûrs.
+- `src/core/http.js` — soumission HTTP same-origin des formulaires PokéTaka observés, avec whitelist et télémétrie.
 - `src/account/snapshot.js` — état global observé du compte : niveau, roster, Pokédex, Ligue et progression d'expéditions.
 - `src/planner/goals.js` — objectifs globaux, dépendances de progression et bonus de priorité pour l'orchestrateur.
 - `src/features/pokemon/progression.js` — scan de la collection, renforcement sûr, évolution unique et protection des ressources.
@@ -114,3 +115,31 @@ Ordre de décision :
 9. recalculer le plan après chaque action.
 
 Les évolutions à embranchement restent manuelles, car elles représentent un choix irréversible.
+
+
+## Transport HTTP direct
+
+Le bot privilégie maintenant les requêtes serveur réelles lorsque PokéTaka expose un formulaire exploitable dans le DOM.
+
+Le transport :
+
+1. refuse toute URL hors de `https://poketaka.fr` ;
+2. n'autorise qu'une whitelist de routes observées ;
+3. lit directement `_token`, `idempotency_key` et les autres champs du formulaire ;
+4. n'invente jamais de token ou d'endpoint ;
+5. soumet le même payload qu'un formulaire HTML standard ;
+6. suit la redirection serveur et recharge/navigue vers l'URL finale ;
+7. conserve un fallback DOM si le mode HTTP direct est désactivé.
+
+Routes actuellement autorisées :
+
+- `/expeditions/encounters/{id}/capture`
+- `/expeditions/{slug}/launch`
+- `/gyms/{slug}/challenge`
+- `/collection/{id}/level-up`
+- `/collection/{id}/evolve`
+- `/collection/{id}/items/{item}`
+
+Les routes de transfert, achat, vente, échange, suppression ou abandon ne sont pas autorisées.
+
+Pour les équipes d'expédition et d'Arène, le planner injecte directement les IDs choisis dans `pokemon_public_ids[]`, ce qui évite les clics et changements de sélection intermédiaires.
