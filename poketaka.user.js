@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PokéTaka Automation
 // @namespace    https://github.com/Thanan71/poketaka-automation
-// @version      0.4.0
+// @version      0.4.1
 // @description  Assistant d'automatisation DOM pour PokéTaka : expéditions, récompenses, soins, serre et progression.
 // @author       Thanan71
 // @match        https://poketaka.fr/*
@@ -16,7 +16,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.4.0';
+  const VERSION = '0.4.1';
   const STORAGE_KEY = 'poketaka-automation:config';
   const STATE_KEY = 'poketaka-automation:state';
 
@@ -65,6 +65,8 @@
     return String(value)
       .normalize('NFD')
       .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[’'‘`´]/g, ' ')
+      .replace(/[–—-]/g, ' ')
       .replace(/\s+/g, ' ')
       .trim()
       .toLowerCase();
@@ -593,20 +595,41 @@
     return button ? clickElement(button, 'Tentative de capture') : false;
   }
 
-  function expeditionCards() {
-    const startPatterns = [
+  function expeditionPrepareLink(card) {
+    if (!card) return null;
+
+    const direct = card.querySelector(
+      'a[href*="/expeditions/"][href$="/prepare"], a.primary-button[href*="/prepare"], a[href*="/prepare"]'
+    );
+
+    if (direct && isVisible(direct) && !direct.hasAttribute('disabled')) return direct;
+
+    return findClickable([
       'preparer l expedition', 'preparer expedition',
       'lancer expedition', 'lancer l expedition', 'partir', 'demarrer',
       'start expedition', 'start', 'depart', 'envoyer equipe', 'send team',
-    ];
+    ], card, {
+      exclude: ['verrouille', 'locked', 'indisponible', 'unavailable'],
+    });
+  }
 
+  function expeditionCards() {
+    // Sélecteur natif PokéTaka : les missions lançables se trouvent dans le
+    // catalogue "available" et possèdent un lien /prepare.
+    const exact = [...document.querySelectorAll(
+      '.mission-catalog[data-panel="available"] .mission-card, .mission-catalog__grid > .mission-card'
+    )]
+      .filter(isVisible)
+      .filter(card => Boolean(expeditionPrepareLink(card)));
+
+    if (exact.length) return exact;
+
+    // Fallback pour rester compatible si le HTML du site évolue.
     const candidates = [...document.querySelectorAll(
       'article, section, li, .card, [class*="card"], [class*="expedition"], [data-expedition], [data-route]'
     )]
       .filter(isVisible)
-      .filter(el => findClickable(startPatterns, el, {
-        exclude: ['verrouille', 'locked', 'indisponible', 'unavailable'],
-      }));
+      .filter(el => Boolean(expeditionPrepareLink(el)));
 
     const seen = new Set();
     return candidates.filter(el => {
@@ -661,7 +684,7 @@
 
   function parseRequiredLevel(text) {
     return parseFirstMatch(text, [
-      /(?:niveau|niv\.?|level|lvl\.?)\s*(?:requis|required|minimum|min)?\s*[:≥>=-]*\s*(\d+)/i,
+      /(?:niveau|niv\.?|level|lvl\.?)\s*(?:requis|required|minimum|min|conseille|recommended)?\s*[:≥>=-]*\s*(\d+)/i,
       /(?:requis|required)\s*(?:niveau|level|lvl\.?)?\s*[:≥>=-]*\s*(\d+)/i,
     ]);
   }
@@ -746,7 +769,17 @@
   }
 
   function analyzeExpedition(card, index, pageContext) {
-    const text = normalizeText(card.innerText || card.textContent || '');
+    const detailsTrigger = card.querySelector('[data-open-dialog]');
+    const detailsId = detailsTrigger?.getAttribute('data-open-dialog');
+    const details = detailsId ? document.getElementById(detailsId) : null;
+
+    // PokéTaka place les informations de chance/niveau dans un dialog adjacent
+    // qui n'est pas visible tant que l'utilisateur ne l'ouvre pas.
+    const text = normalizeText([
+      card.innerText || card.textContent || '',
+      details?.textContent || '',
+    ].join(' '));
+
     const chance = parseChance(text);
     const durationMinutes = parseDurationMinutes(text);
     const requiredLevel = parseRequiredLevel(text);
@@ -755,13 +788,7 @@
     const progressionRank = zoneRank(text, index);
     const newProgression = isNewProgression(text);
     const completed = isPreviouslyCompleted(text);
-    const startButton = findClickable([
-      'preparer l expedition', 'preparer expedition',
-      'lancer expedition', 'lancer l expedition', 'partir', 'demarrer',
-      'start expedition', 'start', 'depart', 'envoyer equipe', 'send team',
-    ], card, {
-      exclude: ['verrouille', 'locked', 'indisponible', 'unavailable'],
-    });
+    const startButton = expeditionPrepareLink(card);
 
     let score = progressionRank * 6;
     const reasons = [];
