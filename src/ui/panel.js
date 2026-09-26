@@ -1067,6 +1067,16 @@ GM_addStyle(`
         return;
       }
 
+      if (action === 'background-refresh-dec') {
+        stepCaptureSetting('backgroundRefreshSeconds', -10, 10, 300);
+        return;
+      }
+
+      if (action === 'background-refresh-inc') {
+        stepCaptureSetting('backgroundRefreshSeconds', 10, 10, 300);
+        return;
+      }
+
       if (action === 'ranking') {
         const ranking = rankExpeditions();
         if (!ranking.length) {
@@ -1230,7 +1240,7 @@ GM_addStyle(`
       'autoEvolvePokemon',
       'autoPlant',
     ];
-    const intelligenceKeys = ['smartTeam', 'directHttpActions'];
+    const intelligenceKeys = ['smartTeam', 'directHttpActions', 'backgroundHttpMode'];
     const captureKeys = [
       'autoCapture',
       'smartCapture',
@@ -1266,6 +1276,17 @@ GM_addStyle(`
       .join('');
 
     const transport = httpTransportState();
+    const background = backgroundHttpState();
+    const backgroundLabel = config.backgroundHttpMode
+      ? background.lastUrl
+        ? `GET · ${background.lastStatus ?? '?'}`
+        : 'GET silencieux'
+      : 'Navigation visible';
+    const backgroundTone = background.lastError
+      ? 'danger'
+      : background.lastUrl
+        ? 'ready'
+        : '';
     const transportLabel = config.directHttpActions
       ? transport.lastEndpoint
         ? `HTTP · ${transport.lastStatus ?? '?'}`
@@ -1315,7 +1336,8 @@ GM_addStyle(`
           </div>
           <div class="pta-subtitle">
             ${escapeHtml(current?.label || 'Page PokéTaka')} · ${config.enabled ? 'Pilotage actif' : 'En pause'}
-            · ${config.directHttpActions ? 'HTTP direct' : 'DOM'}
+            · ${config.backgroundHttpMode ? 'GET silencieux' : 'Navigation'}
+            · ${config.directHttpActions ? 'POST direct' : 'DOM'}
             ${GM_info?.script?.version && GM_info.script.version !== VERSION
               ? ` · Loader ${escapeHtml(GM_info.script.version)}`
               : ''}
@@ -1576,6 +1598,22 @@ GM_addStyle(`
               </span>
             </div>
             <div class="pta-module">
+              <span class="pta-mini-dot ${backgroundTone}"></span>
+              <span class="pta-module-name">Observation</span>
+              <span
+                class="pta-module-status"
+                title="${escapeHtml(
+                  background.lastError ||
+                  background.lastUrl ||
+                  (config.backgroundHttpMode
+                    ? 'GET same-origin parsés hors écran'
+                    : 'Navigation visible utilisée pour collecter les informations')
+                )}"
+              >
+                ${escapeHtml(backgroundLabel)} · ${background.gets || 0}
+              </span>
+            </div>
+            <div class="pta-module">
               <span class="pta-mini-dot ${transportTone}"></span>
               <span class="pta-module-name">Transport</span>
               <span
@@ -1664,8 +1702,25 @@ GM_addStyle(`
             </span>
           </summary>
           <div class="pta-settings">
+            <div class="pta-settings-note">
+              <strong>GET silencieux</strong> lit les pages en arrière-plan sans te déplacer.
+              <strong>POST direct</strong> exécute ensuite les formulaires serveur observés.
+            </div>
             ${optionButton('smartTeam', 'Équipe intelligente')}
-            ${optionButton('directHttpActions', 'Requêtes HTTP directes')}
+            ${optionButton('backgroundHttpMode', 'GET silencieux en arrière-plan')}
+            ${optionButton('directHttpActions', 'POST HTTP directs')}
+
+            <div class="pta-stepper">
+              <div class="pta-stepper-label">
+                Rafraîchissement GET
+                <small>Intervalle normal entre deux observations arrière-plan</small>
+              </div>
+              <div class="pta-stepper-value">${config.backgroundRefreshSeconds}s</div>
+              <div class="pta-stepper-controls">
+                <button class="pta-stepper-btn" data-action="background-refresh-dec" title="Rafraîchir plus souvent">−</button>
+                <button class="pta-stepper-btn" data-action="background-refresh-inc" title="Rafraîchir moins souvent">+</button>
+              </div>
+            </div>
           </div>
         </details>
 
