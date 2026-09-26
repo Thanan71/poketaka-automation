@@ -2,7 +2,7 @@
 (() => {
   'use strict';
 
-  const VERSION = "0.9.10";
+  const VERSION = "0.9.11";
 
 // ---- src/core/config.js ----
 const STORAGE_KEY = 'poketaka-automation:config';
@@ -115,12 +115,132 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
     GM_setValue(STORAGE_KEY, config);
   }
 
+
+  function emptyCaptureDecision() {
+    return {
+      action: 'none',
+      reason: null,
+      species: null,
+      isNew: null,
+      rarity: null,
+      ivScore: null,
+      ballName: null,
+      ballCode: null,
+      ballReserve: null,
+      captureChance: null,
+      attemptsRemaining: null,
+      updatedAt: 0,
+    };
+  }
+
+  function resetCaptureDecision(reason = null) {
+    const previous = state.captureDecision || emptyCaptureDecision();
+    const wasActive = previous.action !== 'none' || Boolean(previous.species);
+    if (!wasActive) return false;
+
+    state.captureDecision = {
+      ...emptyCaptureDecision(),
+      reason,
+      updatedAt: now(),
+    };
+
+    saveState(state);
+
+    if (wasActive) {
+      appendActionLog(
+        'info',
+        'state',
+        'État de capture réinitialisé',
+        {
+          previousAction: previous.action || 'none',
+          previousSpecies: previous.species || null,
+          reason,
+        }
+      );
+    }
+
+    return wasActive;
+  }
+
+  function clearExpeditionSelection(reason = null) {
+    const previous = {
+      selectedExpedition: state.selectedExpedition || null,
+      selectedExpeditionScore: state.selectedExpeditionScore ?? null,
+      planTitle: state.expeditionPlan?.title || null,
+      planViability: state.expeditionPlan?.viability || null,
+    };
+
+    const hadSelection = Boolean(
+      previous.selectedExpedition ||
+      previous.planTitle ||
+      previous.selectedExpeditionScore != null ||
+      (previous.planViability && previous.planViability !== 'unknown')
+    );
+    if (!hadSelection) return false;
+
+    state.selectedExpedition = null;
+    state.selectedExpeditionScore = null;
+    state.expeditionPlan = {
+      title: null,
+      team: [],
+      teamIds: [],
+      teamScore: null,
+      viability: 'unknown',
+      reason: reason || null,
+      updatedAt: now(),
+    };
+
+    saveState(state);
+
+    if (hadSelection) {
+      appendActionLog(
+        'info',
+        'state',
+        'Plan d’expédition périmé nettoyé',
+        { ...previous, reason }
+      );
+    }
+
+    return hadSelection;
+  }
+
+  function actionGuardEntries() {
+    if (!state.actionGuards || typeof state.actionGuards !== 'object') {
+      state.actionGuards = {};
+    }
+    return state.actionGuards;
+  }
+
+  function actionGuardRemaining(key, cooldownMs = 5000) {
+    if (!key) return 0;
+    const lastAt = Number(actionGuardEntries()[key] || 0);
+    return Math.max(0, cooldownMs - (now() - lastAt));
+  }
+
+  function acquireActionGuard(key, cooldownMs = 5000) {
+    if (!key) return true;
+
+    const remaining = actionGuardRemaining(key, cooldownMs);
+    if (remaining > 0) return false;
+
+    const cutoff = now() - 60 * 60 * 1000;
+    const entries = Object.entries(actionGuardEntries())
+      .filter(([, at]) => Number(at) >= cutoff)
+      .slice(-120);
+
+    state.actionGuards = Object.fromEntries(entries);
+    state.actionGuards[key] = now();
+    saveState(state);
+    return true;
+  }
+
   function loadState() {
     return {
       lastActionAt: 0,
       lastAction: 'aucune',
       lastBotClickAt: 0,
       actionLog: [],
+      actionGuards: {},
       panelView: 'dashboard',
       httpTransport: {
         requests: 0,
@@ -186,20 +306,7 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
         lastUpgradeAt: 0,
         lastEvolutionAt: 0,
       },
-      captureDecision: {
-        action: 'none',
-        reason: null,
-        species: null,
-        isNew: null,
-        rarity: null,
-        ivScore: null,
-        ballName: null,
-        ballCode: null,
-        ballReserve: null,
-        captureChance: null,
-        attemptsRemaining: null,
-        updatedAt: 0,
-      },
+      captureDecision: emptyCaptureDecision(),
       expeditionStats: {},
       lastRecordedResultUrl: null,
       gymCycle: {
@@ -345,7 +452,7 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
   }
 
   function setExpeditionPhase(phase, patch = {}) {
-    const previous = expeditionCycle();
+    const previous = { ...expeditionCycle() };
     state.expeditionCycle = {
       ...previous,
       ...patch,
@@ -367,10 +474,20 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
       appendActionLog(
         'info',
         'expedition',
-        `Cycle expédition → ${phase}`,
+        `Cycle expédition: ${previous.phase || 'unknown'} → ${phase}`,
         {
-          title: state.expeditionCycle.title,
-          dueAt: state.expeditionCycle.dueAt,
+          before: {
+            phase: previous.phase || 'unknown',
+            title: previous.title || null,
+            resultUrl: previous.resultUrl || null,
+            dueAt: previous.dueAt || null,
+          },
+          after: {
+            phase: state.expeditionCycle.phase,
+            title: state.expeditionCycle.title || null,
+            resultUrl: state.expeditionCycle.resultUrl || null,
+            dueAt: state.expeditionCycle.dueAt || null,
+          },
         }
       );
     }
@@ -446,6 +563,23 @@ function elementText(el) {
 
   async function clickElement(el, actionName) {
     if (!el || !isVisible(el) || isBotUiElement(el) || isUnsafe(el)) return false;
+
+    const targetSignature = [
+      el.tagName || '',
+      el.getAttribute?.('href') || '',
+      el.getAttribute?.('action') || '',
+      el.getAttribute?.('formaction') || '',
+      elementText(el).slice(0, 80),
+    ].join('|');
+    const guardKey = `dom:${normalizeText(actionName)}:${normalizeText(targetSignature)}`;
+
+    if (!acquireActionGuard(guardKey, 4500)) {
+      log('Clic temporisé: action identique récente', {
+        actionName,
+        remainingMs: actionGuardRemaining(guardKey, 4500),
+      });
+      return false;
+    }
 
     state.lastActionAt = now();
     state.lastBotClickAt = now();
@@ -845,6 +979,7 @@ async function submitObservedForm(
     expectedKind = null,
     navigate = true,
     moduleId = null,
+    cooldownMs = 5000,
   } = {}
 ) {
   if (!config.directHttpActions) return false;
@@ -886,6 +1021,16 @@ async function submitObservedForm(
     !idempotency
   ) {
     log('HTTP direct refusé: clé idempotency absente', kind);
+    return false;
+  }
+
+  const guardKey = `http:${kind}:${url.pathname}:${idempotency || 'no-idempotency'}`;
+  if (!acquireActionGuard(guardKey, cooldownMs)) {
+    log('HTTP direct temporisé: action identique récente', {
+      kind,
+      endpoint: url.pathname,
+      remainingMs: actionGuardRemaining(guardKey, cooldownMs),
+    });
     return false;
   }
 
@@ -4179,6 +4324,67 @@ async function captureEncounter() {
   return false;
 }
 
+// ---- src/features/expeditions/result.js ----
+function expeditionRewardClaimForm(root = document) {
+  return root.querySelector(
+    'form[method="POST"][action*="/expeditions/results/"][action$="/claim"]'
+  );
+}
+
+function expeditionRewardsRecovered(root = document) {
+  const claimForm = expeditionRewardClaimForm(root);
+  if (claimForm) return false;
+
+  const metas = [...root.querySelectorAll('.mission-rewards .mission-reward__meta')]
+    .map(node => normalizeText(node.textContent || ''))
+    .filter(Boolean);
+
+  if (!metas.length) {
+    return Boolean(root.querySelector('.result-claimed'));
+  }
+
+  return metas.every(meta =>
+    !/a recuperer|to claim|claimable|pending/.test(meta)
+  );
+}
+
+function expeditionResultState(root = document) {
+  const captureForm = root.querySelector('form[data-capture-form]');
+  const claimForm = expeditionRewardClaimForm(root);
+
+  return {
+    hasCapture: Boolean(captureForm),
+    hasClaim: Boolean(claimForm),
+    rewardsRecovered: expeditionRewardsRecovered(root),
+    captureForm,
+    claimForm,
+  };
+}
+
+function reconcileExpeditionResultState(root = document, source = 'result') {
+  const snapshot = expeditionResultState(root);
+
+  if (!snapshot.hasCapture) {
+    resetCaptureDecision(`no_capture:${source}`);
+  }
+
+  if (snapshot.hasClaim && expeditionCycle().phase === 'ready_to_start') {
+    appendActionLog(
+      'warning',
+      'state',
+      'Invariant corrigé: récompenses encore à récupérer',
+      {
+        source,
+        previousPhase: 'ready_to_start',
+        nextPhase: 'due',
+      }
+    );
+    setExpeditionPhase('due');
+  }
+
+  return snapshot;
+}
+
 // ---- src/features/expeditions/cycle.js ----
 async function claimExpedition() {
     if (!config.autoClaimExpeditions) return false;
@@ -4194,7 +4400,7 @@ async function claimExpedition() {
         'Récupération HTTP des récompenses',
         {
           expectedKind: 'expedition_claim',
-          navigate: false,
+          navigate: true,
           moduleId: 'expeditions',
         }
       );
@@ -4333,9 +4539,28 @@ async function claimExpedition() {
   }
 
   async function returnToExpeditions() {
+    const resultState = expeditionResultState(document);
+    if (resultState.hasClaim) {
+      appendActionLog(
+        'warning',
+        'state',
+        'Retour expéditions refusé: récompenses encore à récupérer',
+        { pathname: location.pathname }
+      );
+      setExpeditionPhase('due');
+      return false;
+    }
+
     const link = expeditionIndexLink();
     if (!link) return false;
-    setExpeditionPhase('ready_to_start', { resultUrl: null, dueAt: null });
+
+    resetCaptureDecision('leaving_resolved_result');
+    clearExpeditionSelection('leaving_resolved_result');
+    setExpeditionPhase('ready_to_start', {
+      title: null,
+      resultUrl: null,
+      dueAt: null,
+    });
     return clickElement(link, 'Retour aux expéditions');
   }
 
@@ -4387,8 +4612,8 @@ async function claimExpedition() {
         return false;
       }
 
-      state.selectedExpedition = null;
-      state.selectedExpeditionScore = null;
+      resetCaptureDecision('visible_expedition_index_without_active');
+      clearExpeditionSelection('visible_expedition_index_without_active');
       setExpeditionPhase('ready_to_start', {
         title: null,
         resultUrl: null,
@@ -4400,12 +4625,13 @@ async function claimExpedition() {
 
     if (isExpeditionResultPage()) {
       recordExpeditionOutcome();
+      const resultState = reconcileExpeditionResultState(document, 'visible_result');
 
       if (!['claiming', 'awaiting_capture'].includes(cycleState.phase)) {
         setExpeditionPhase('result');
       }
 
-      if (resultPageHasPendingCapture()) {
+      if (resultState.hasCapture && resultPageHasPendingCapture()) {
         const handledCapture = await captureEncounter();
         if (handledCapture) return true;
 
@@ -4414,14 +4640,25 @@ async function claimExpedition() {
         }
       }
 
-      const claimed = await claimExpedition();
-      if (claimed) return true;
+      if (resultState.hasClaim) {
+        const claimed = await claimExpedition();
+        if (claimed) return true;
+
+        // Invariant: a visible /claim form always wins over any stale local
+        // phase such as ready_to_start or claiming.
+        setExpeditionPhase('due');
+        return false;
+      }
 
       const currentCycle = expeditionCycle();
       const claimGracePassed = now() - (currentCycle.lastTransitionAt || 0) > 2500;
       if (
         claimGracePassed &&
-        (currentCycle.phase === 'claiming' || resultPageLooksResolved())
+        (
+          resultState.rewardsRecovered ||
+          currentCycle.phase === 'claiming' ||
+          resultPageLooksResolved()
+        )
       ) {
         return returnToExpeditions();
       }
@@ -5436,6 +5673,8 @@ async function backgroundObserveExpeditions({ force = false } = {}) {
     };
   }
 
+  resetCaptureDecision('expedition_index_without_pending_result');
+  clearExpeditionSelection('expedition_index_without_pending_result');
   setExpeditionPhase('ready_to_start', {
     title: null,
     resultUrl: null,
@@ -5556,29 +5795,6 @@ function recordDetachedExpeditionOutcome(root, pathname) {
   saveState(state);
 }
 
-function expeditionRewardClaimForm(root) {
-  return root.querySelector(
-    'form[method="POST"][action*="/expeditions/results/"][action$="/claim"]'
-  );
-}
-
-function expeditionRewardsRecovered(root) {
-  const claimForm = expeditionRewardClaimForm(root);
-  if (claimForm) return false;
-
-  const metas = [...root.querySelectorAll('.mission-rewards .mission-reward__meta')]
-    .map(node => normalizeText(node.textContent || ''))
-    .filter(Boolean);
-
-  if (!metas.length) {
-    return Boolean(root.querySelector('.result-claimed'));
-  }
-
-  return metas.every(meta =>
-    !/a recuperer|to claim|claimable|pending/.test(meta)
-  );
-}
-
 async function verifyBackgroundExpeditionClaim(resultUrl) {
   const page = await fetchObservedPage(resultUrl, {
     cacheMs: 0,
@@ -5621,6 +5837,7 @@ async function backgroundHandleExpeditionResult(active) {
   if (!page) return false;
 
   recordDetachedExpeditionOutcome(page.doc, page.pathname);
+  const resultState = reconcileExpeditionResultState(page.doc, 'background_result');
 
   const capture = detachedCaptureDecision(page.doc);
   if (capture) {
@@ -5687,7 +5904,9 @@ async function backgroundHandleExpeditionResult(active) {
     }
   }
 
-  if (expeditionRewardsRecovered(page.doc)) {
+  if (resultState.rewardsRecovered) {
+    resetCaptureDecision('result_recovered:background');
+    clearExpeditionSelection('result_recovered:background');
     setExpeditionPhase('ready_to_start', {
       title: null,
       resultUrl: null,
@@ -5702,7 +5921,7 @@ async function backgroundHandleExpeditionResult(active) {
     return false;
   }
 
-  const claimForm = expeditionRewardClaimForm(page.doc);
+  const claimForm = resultState.claimForm;
 
   if (config.autoClaimExpeditions && claimForm) {
     setExpeditionPhase('claiming', {
@@ -5739,6 +5958,8 @@ async function backgroundHandleExpeditionResult(active) {
 
     const verified = await verifyBackgroundExpeditionClaim(active.resultUrl);
     if (verified) {
+      resetCaptureDecision('claim_verified:background');
+      clearExpeditionSelection('claim_verified:background');
       setExpeditionPhase('ready_to_start', {
         title: null,
         resultUrl: null,
