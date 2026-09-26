@@ -57,6 +57,23 @@ function elementText(el) {
   async function clickElement(el, actionName) {
     if (!el || !isVisible(el) || isBotUiElement(el) || isUnsafe(el)) return false;
 
+    const targetSignature = [
+      el.tagName || '',
+      el.getAttribute?.('href') || '',
+      el.getAttribute?.('action') || '',
+      el.getAttribute?.('formaction') || '',
+      elementText(el).slice(0, 80),
+    ].join('|');
+    const guardKey = `dom:${normalizeText(actionName)}:${normalizeText(targetSignature)}`;
+
+    if (!acquireActionGuard(guardKey, 4500)) {
+      log('Clic temporisé: action identique récente', {
+        actionName,
+        remainingMs: actionGuardRemaining(guardKey, 4500),
+      });
+      return false;
+    }
+
     state.lastActionAt = now();
     state.lastBotClickAt = now();
     state.lastAction = actionName;
