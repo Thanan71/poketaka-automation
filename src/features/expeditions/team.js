@@ -158,7 +158,7 @@ function scorePokemonForMission(pokemon, context) {
   }
 
   if (context.missionTypes?.length && pokemon.types?.length) {
-    const matchup = context.missionTypes.reduce((sum, defender) => {
+    const offensive = context.missionTypes.reduce((sum, defender) => {
       const best = Math.max(
         ...pokemon.types.map(attacker => typeMultiplier(attacker, defender))
       );
@@ -170,8 +170,23 @@ function scorePokemonForMission(pokemon, context) {
       return sum;
     }, 0);
 
-    score += matchup;
-    if (matchup) reasons.push(`${matchup > 0 ? '+' : ''}${matchup} types`);
+    const defensive = context.missionTypes.reduce((sum, attacker) => {
+      const received = pokemon.types.reduce(
+        (multiplier, defender) => multiplier * typeMultiplier(attacker, defender),
+        1
+      );
+
+      if (received === 0) return sum + 55;
+      if (received <= 0.25) return sum + 40;
+      if (received < 1) return sum + 25;
+      if (received >= 4) return sum - 90;
+      if (received > 1) return sum - 45;
+      return sum;
+    }, 0);
+
+    score += offensive + defensive;
+    if (offensive) reasons.push(`${offensive > 0 ? '+' : ''}${offensive} attaque/types`);
+    if (defensive) reasons.push(`${defensive > 0 ? '+' : ''}${defensive} défense/types`);
   }
 
   if (pokemon.favorite) score += 5;
@@ -194,7 +209,29 @@ function chooseTeamForMission(roster, context) {
     .sort((a, b) => b.score - a.score);
 
   const viable = ranked.filter(pokemon => pokemon.viable);
-  const team = viable.slice(0, teamSize);
+  const team = [];
+  const usedTypes = new Set();
+
+  while (team.length < teamSize) {
+    const remaining = viable.filter(pokemon => !team.some(member => member.id === pokemon.id));
+    if (!remaining.length) break;
+
+    const next = remaining
+      .map(pokemon => {
+        const newTypes = pokemon.types.filter(type => !usedTypes.has(type)).length;
+        const overlap = pokemon.types.filter(type => usedTypes.has(type)).length;
+        return {
+          pokemon,
+          adjustedScore: pokemon.score + newTypes * 18 - overlap * 6,
+        };
+      })
+      .sort((a, b) => b.adjustedScore - a.adjustedScore)[0]?.pokemon;
+
+    if (!next) break;
+    team.push(next);
+    next.types.forEach(type => usedTypes.add(type));
+  }
+
   const complete = team.length >= teamSize;
   const teamScore = team.length
     ? Math.round(team.reduce((sum, pokemon) => sum + pokemon.score, 0) / team.length)
@@ -226,10 +263,24 @@ function chooseTeamForMission(roster, context) {
 function updateRosterSnapshot(requirement) {
   if (!requirement?.form) return [];
 
-  const roster = [...requirement.form.querySelectorAll('[data-team-pokemon][data-pokemon-id]')]
+  const visibleRoster = [...requirement.form.querySelectorAll('[data-team-pokemon][data-pokemon-id]')]
     .map(pokemonFromCard)
     .filter(pokemon => pokemon.id);
 
+  const previousById = new Map(
+    (state.rosterSnapshot?.pokemon || []).map(pokemon => [pokemon.id, pokemon])
+  );
+
+  const mergedById = new Map();
+  for (const pokemon of visibleRoster) mergedById.set(pokemon.id, pokemon);
+
+  for (const selectedId of requirement.selectedIds || []) {
+    if (!mergedById.has(selectedId) && previousById.has(selectedId)) {
+      mergedById.set(selectedId, previousById.get(selectedId));
+    }
+  }
+
+  const roster = [...mergedById.values()];
   state.rosterSnapshot = {
     capturedAt: now(),
     pokemon: roster.map(serializablePokemon),
@@ -357,9 +408,15 @@ async function handleExpeditionPreparation() {
   if (!requirement) return false;
 
   const assessment = preparationTeamPlan(requirement);
+  const canonicalTitle = expeditionCycle().title || assessment.context.title || 'expedition';
+
+  if (assessment.plan.viable && state.expeditionBlocks?.[canonicalTitle]) {
+    delete state.expeditionBlocks[canonicalTitle];
+    saveState(state);
+  }
 
   if (config.smartTeam && !assessment.plan.viable) {
-    const title = assessment.context.title || expeditionCycle().title || 'expedition';
+    const title = canonicalTitle;
     blockMissionTemporarily(title, assessment.plan.reason);
 
     state.lastAction = `Mission écartée: ${title} — ${assessment.plan.reason}`;
