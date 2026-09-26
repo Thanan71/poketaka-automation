@@ -8,6 +8,7 @@ const MODULES = [
   'src/core/config.js',
   'src/core/state.js',
   'src/core/dom.js',
+  'src/features/expeditions/team.js',
   'src/features/expeditions/cycle.js',
   'src/features/activities.js',
   'src/features/expeditions/catalog.js',
