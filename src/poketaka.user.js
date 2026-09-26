@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PokéTaka Automation
 // @namespace    https://github.com/Thanan71/poketaka-automation
-// @version      0.3.1
+// @version      0.3.2
 // @description  Assistant d'automatisation DOM pour PokéTaka : expéditions, récompenses, soins, serre et progression.
 // @author       Thanan71
 // @match        https://poketaka.fr/*
@@ -16,7 +16,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.3.1';
+  const VERSION = '0.3.2';
   const STORAGE_KEY = 'poketaka-automation:config';
   const STATE_KEY = 'poketaka-automation:state';
 
@@ -643,6 +643,8 @@
 
   function parseCountdownMs(text) {
     const normalized = normalizeText(text);
+
+    // Format de compte à rebours explicite : HH:MM:SS ou MM:SS.
     const clock = normalized.match(/\b(\d{1,2}):(\d{2})(?::(\d{2}))?\b/);
     if (clock) {
       const first = Number(clock[1]);
@@ -665,6 +667,213 @@
     return found && seconds > 0 ? seconds * 1000 : null;
   }
 
+  function parseAbsoluteEndClockMs(text) {
+    const normalized = normalizeText(text);
+    const match = normalized.match(/(?:termine|terminee|fin|retour|revient|ends?|returns?|ready|pret|prete)[^\d]{0,24}(?:a|at)\s*(\d{1,2}):(\d{2})(?::(\d{2}))?/i);
+    if (!match) return null;
+
+    const target = new Date();
+    target.setHours(Number(match[1]), Number(match[2]), Number(match[3] || 0), 0);
+    if (target.getTime() <= now()) target.setDate(target.getDate() + 1);
+
+    const delta = target.getTime() - now();
+    return delta > 0 && delta <= 48 * 60 * 60 * 1000 ? delta : null;
+  }
+
+  function parseTimestampValue(value) {
+    if (value == null || value === '') return null;
+    const raw = String(value).trim();
+
+    if (/^\d{10,13}$/.test(raw)) {
+      const numeric = Number(raw);
+      const timestamp = raw.length === 10 ? numeric * 1000 : numeric;
+      const delta = timestamp - now();
+      return delta > 0 && delta <= 7 * 24 * 60 * 60 * 1000 ? delta : null;
+    }
+
+    const parsed = Date.parse(raw);
+    if (!Number.isNaN(parsed)) {
+      const delta = parsed - now();
+      return delta > 0 && delta <= 7 * 24 * 60 * 60 * 1000 ? delta : null;
+    }
+
+    return null;
+  }
+
+  function timerDataAttributeMs(element) {
+    const names = [
+      'datetime',
+      'data-end',
+      'data-end-at',
+      'data-end-time',
+      'data-ends-at',
+      'data-expires-at',
+      'data-finish-at',
+      'data-finished-at',
+      'data-complete-at',
+    ];
+
+    for (const name of names) {
+      const value = element.getAttribute?.(name);
+      const delta = parseTimestampValue(value);
+      if (delta) return { ms: delta, source: `${name}=${value}` };
+    }
+
+    return null;
+  }
+
+  function extractLabeledCountdownText(text) {
+    const normalized = normalizeText(text);
+    const labels = [
+      'temps restant',
+      'time remaining',
+      'remaining',
+      'retour dans',
+      'revient dans',
+      'returns in',
+      'se termine dans',
+      'termine dans',
+      'fin dans',
+      'ends in',
+      'fini dans',
+      'pret dans',
+      'prete dans',
+      'ready in',
+      'recolte dans',
+      'harvest in',
+      'eclosion dans',
+      'hatch in',
+    ];
+
+    for (const label of labels) {
+      const index = normalized.indexOf(label);
+      if (index === -1) continue;
+      return normalized.slice(index, index + 120);
+    }
+
+    return null;
+  }
+
+  function activeTimerContext(text, moduleId) {
+    const normalized = normalizeText(text);
+
+    // Une durée de route comme "Durée 30 min" n'est PAS un compte à rebours.
+    if (
+      moduleId === 'expeditions' &&
+      /(?:^|\s)(?:duree|duration)\s*[:\-]?\s*\d/.test(normalized) &&
+      !/(?:en cours|in progress|temps restant|remaining|retour dans|returns in|se termine|ends in)/.test(normalized)
+    ) {
+      return false;
+    }
+
+    const common = /temps restant|time remaining|remaining|retour dans|revient dans|returns in|se termine dans|termine dans|fin dans|ends in|pret dans|prete dans|ready in/;
+    if (common.test(normalized)) return true;
+
+    if (moduleId === 'expeditions') {
+      return /expedition en cours|exploration en cours|expedition active|in progress expedition|active expedition/.test(normalized);
+    }
+
+    if (moduleId === 'greenhouse') {
+      return /recolte dans|harvest in|pousse|growing|culture en cours|plantation en cours/.test(normalized);
+    }
+
+    if (moduleId === 'incubator') {
+      return /incubation en cours|eclosion dans|hatch in|fossile en cours|restauration en cours/.test(normalized);
+    }
+
+    if (moduleId === 'breeding') {
+      return /pension en cours|elevage en cours|breeding|oeuf dans|egg in/.test(normalized);
+    }
+
+    return false;
+  }
+
+  function findModuleCountdown(module) {
+    const root = document.querySelector('main, [role="main"], #content, .content') || document.body;
+    if (!root) return null;
+
+    // 1) Sources structurées : préférables au texte car elles représentent souvent
+    // directement l'heure de fin calculée par le front.
+    const structured = [...root.querySelectorAll([
+      'time[datetime]',
+      '[data-countdown]',
+      '[data-timer]',
+      '[data-remaining]',
+      '[data-end]',
+      '[data-end-at]',
+      '[data-end-time]',
+      '[data-ends-at]',
+      '[data-expires-at]',
+      '[data-finish-at]',
+      '[data-finished-at]',
+      '[data-complete-at]',
+      '[class*="countdown"]',
+      '[class*="timer"]',
+      '[id*="countdown"]',
+      '[id*="timer"]',
+    ].join(','))]
+      .filter(isVisible)
+      .filter(el => !el.closest('#pta-panel'));
+
+    for (const element of structured) {
+      const fromAttribute = timerDataAttributeMs(element);
+      if (fromAttribute) {
+        return {
+          ms: fromAttribute.ms,
+          source: 'attribut structuré',
+          text: fromAttribute.source,
+        };
+      }
+
+      const text = normalizeText(element.textContent || element.getAttribute('aria-label') || '');
+      if (!text) continue;
+
+      const absolute = parseAbsoluteEndClockMs(text);
+      if (absolute) return { ms: absolute, source: 'timer structuré (heure de fin)', text };
+
+      const countdown = parseCountdownMs(text);
+      if (countdown) return { ms: countdown, source: 'timer structuré', text };
+    }
+
+    // 2) Texte contextuel : on ne considère un nombre comme timer que s'il est
+    // relié explicitement à une action en cours.
+    const candidates = [...root.querySelectorAll(
+      'p, span, small, strong, li, div, article, section, [class*="status"], [class*="progress"]'
+    )]
+      .filter(isVisible)
+      .filter(el => !el.closest('#pta-panel'))
+      .map(el => ({
+        element: el,
+        text: normalizeText(el.innerText || el.textContent || ''),
+      }))
+      .filter(item => item.text && item.text.length <= 600)
+      .filter(item => activeTimerContext(item.text, module.id))
+      .sort((a, b) => a.text.length - b.text.length);
+
+    for (const candidate of candidates) {
+      const absolute = parseAbsoluteEndClockMs(candidate.text);
+      if (absolute) {
+        return {
+          ms: absolute,
+          source: 'texte contextuel (heure de fin)',
+          text: candidate.text.slice(0, 160),
+        };
+      }
+
+      const labeled = extractLabeledCountdownText(candidate.text);
+      const countdown = parseCountdownMs(labeled || candidate.text);
+      if (countdown) {
+        return {
+          ms: countdown,
+          source: labeled ? 'texte avec libellé' : 'bloc actif',
+          text: (labeled || candidate.text).slice(0, 160),
+        };
+      }
+    }
+
+    return null;
+  }
+
   function modulePageText() {
     const main = document.querySelector('main, [role="main"], #content, .content');
     return normalizeText((main || document.body)?.innerText || '');
@@ -674,19 +883,38 @@
     const current = moduleFromLocation();
     if (!current) return;
 
-    const text = modulePageText();
-    const countdownMs = parseCountdownMs(text);
+    const timerInfo = findModuleCountdown(current);
     const previous = state.moduleStatus?.[current.id] || {};
+    const previousDueAt = previous.nextDueAt || null;
+    const nextDueAt = timerInfo ? now() + timerInfo.ms : null;
 
     state.moduleStatus = {
       ...(state.moduleStatus || {}),
       [current.id]: {
         ...previous,
         lastVisitedAt: now(),
-        nextDueAt: countdownMs ? now() + countdownMs : null,
+        nextDueAt,
+        timerSource: timerInfo?.source || null,
+        timerText: timerInfo?.text || null,
+        lastTimerSeenAt: timerInfo ? now() : previous.lastTimerSeenAt || null,
       },
     };
     saveState(state);
+
+    if (config.debug) {
+      if (timerInfo) {
+        const changed = !previousDueAt || Math.abs(previousDueAt - nextDueAt) > 5000;
+        if (changed) {
+          log(`Timer ${current.id} détecté:`, {
+            remaining: formatRemaining(nextDueAt),
+            source: timerInfo.source,
+            text: timerInfo.text,
+          });
+        }
+      } else if (current.id === 'expeditions') {
+        log('Timer expédition: aucun compte à rebours actif détecté (les durées statiques sont ignorées).');
+      }
+    }
   }
 
   function markModuleAction(moduleId) {
