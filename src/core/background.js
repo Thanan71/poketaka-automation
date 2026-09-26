@@ -4,7 +4,11 @@ function backgroundSweepDue() {
   const last = Number(backgroundHttpState().lastSweepAt || 0);
   const interval = Math.max(10, Number(config.backgroundRefreshSeconds || 30)) * 1000;
 
-  if (expeditionCycle().phase === 'due') return true;
+  if (
+    ['due', 'ready_to_start', 'preparing', 'starting'].includes(
+      expeditionCycle().phase
+    )
+  ) return true;
   if (leagueNeedsDailyCheck()) return true;
   if (pokemonProgressionScanDue()) return true;
 
