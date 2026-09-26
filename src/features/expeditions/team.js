@@ -449,7 +449,7 @@ async function handleExpeditionPreparation() {
         title: canonicalTitle,
       });
 
-      return submitObservedForm(
+      const submitted = await submitObservedForm(
         requirement.form,
         `Lancement HTTP: ${canonicalTitle}`,
         {
@@ -460,6 +460,14 @@ async function handleExpeditionPreparation() {
           },
         }
       );
+
+      if (!submitted) {
+        setExpeditionPhase('preparing', {
+          title: canonicalTitle,
+        });
+      }
+
+      return submitted;
     }
   }
 
@@ -507,11 +515,14 @@ async function handleExpeditionPreparation() {
     setExpeditionPhase('starting');
 
     if (config.directHttpActions) {
-      return submitObservedForm(
+      const submitted = await submitObservedForm(
         requirement.form,
         'Lancement HTTP de l’expédition',
         { expectedKind: 'expedition_launch' }
       );
+
+      if (!submitted) setExpeditionPhase('preparing');
+      return submitted;
     }
 
     return clickElement(launchButton, 'Lancement de l’expédition');
