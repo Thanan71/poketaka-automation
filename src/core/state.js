@@ -90,6 +90,8 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
         blockedUntil: 0,
         lastCheckAt: 0,
         lastChallengeAt: 0,
+        challengeSubmittedDay: null,
+        completedDay: null,
       },
       orchestrator: {
         lastDecision: null,
