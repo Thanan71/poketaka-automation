@@ -16,7 +16,7 @@ Il ne cherche pas à :
 - appeler une API privée découverte par rétro-ingénierie ;
 - acheter, vendre, libérer ou échanger automatiquement des Pokémon/objets.
 
-## Fonctionnalités v0.1
+## Fonctionnalités
 
 - récupération automatique des expéditions terminées ;
 - relance d'une expédition disponible avec stratégie `progression-first` ;
@@ -42,7 +42,21 @@ Le script est volontairement **désactivé au premier lancement** afin de pouvoi
 
 ## Stratégie de progression
 
-La première version ne connaît pas les modèles Laravel côté serveur. Elle travaille uniquement sur l'interface rendue :
+Le script ne connaît pas les modèles Laravel côté serveur et travaille uniquement sur l'interface rendue.
+
+Pour les expéditions, chaque carte lançable reçoit désormais un score. Le calcul combine notamment :
+
+- l'avancement de la zone (Route/Zone/Arène/Ligue) ;
+- le caractère nouveau ou déjà terminé du contenu ;
+- la chance de réussite affichée ;
+- le niveau requis et le niveau d'équipe lorsqu'ils sont visibles ;
+- la durée ;
+- les récompenses visibles (Pokédollars, XP, objets) ;
+- le coût en énergie et l'énergie disponible lorsqu'ils sont affichés.
+
+Une nouvelle progression avec une chance raisonnable est préférée au farming. Une expédition sous le seuil de réussite configuré est fortement pénalisée, et une chance sous 30 % reçoit une pénalité critique.
+
+Le cycle global reste :
 
 1. confirmer une action initiée par le bot ;
 2. récupérer une expédition terminée ;
@@ -50,7 +64,7 @@ La première version ne connaît pas les modèles Laravel côté serveur. Elle t
 4. récolter la serre ;
 5. soigner ;
 6. utiliser un bouton de progression ;
-7. lancer la dernière expédition disponible dans le DOM ;
+7. classer les expéditions et lancer la meilleure ;
 8. naviguer vers une autre section et recommencer.
 
 Cette méthode est moins fragile qu'un script dépendant d'URLs internes supposées et évite de reproduire des requêtes serveur privées.
@@ -88,3 +102,10 @@ Voir [`docs/ANALYSIS.md`](docs/ANALYSIS.md).
 ## Avertissement
 
 L'automatisation peut être contraire aux règles d'un service même lorsque le site ne publie pas de règle facilement accessible. Utilise ce projet à tes risques et respecte les demandes du développeur du jeu si celui-ci encadre ou interdit les bots.
+
+
+## Diagnostic de la stratégie
+
+Dans Tampermonkey, utilise la commande **Afficher le classement des expéditions** lorsque tu es sur la page correspondante.
+
+La console affiche pour chaque choix détecté : score, zone, chance, niveau requis, niveau d'équipe, durée, récompenses et statut de progression. Le détail des bonus/pénalités est également journalisé lorsque le mode debug est actif.
