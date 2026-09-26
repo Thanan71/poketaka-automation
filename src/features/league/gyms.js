@@ -443,7 +443,7 @@ async function handleLeagueAutomation() {
         saveState(state);
         updatePanel();
 
-        return submitObservedForm(
+        const submitted = await submitObservedForm(
           form,
           `Arène HTTP: défier ${assessment.context?.champion || assessment.context?.title || 'le Champion'}`,
           {
@@ -454,6 +454,21 @@ async function handleLeagueAutomation() {
             },
           }
         );
+
+        if (!submitted) {
+          state.gymCycle = {
+            ...gymCycle(),
+            phase: 'blocked',
+            challengeSubmittedDay: null,
+            reason: httpTransportState().lastError
+              ? `Défi HTTP refusé: ${httpTransportState().lastError}`
+              : 'Défi HTTP non soumis',
+          };
+          saveState(state);
+          updatePanel();
+        }
+
+        return submitted;
       }
     }
 
@@ -499,11 +514,26 @@ async function handleLeagueAutomation() {
     updatePanel();
 
     if (config.directHttpActions) {
-      return submitObservedForm(
+      const submitted = await submitObservedForm(
         form,
         `Arène HTTP: défier ${assessment.context?.champion || assessment.context?.title || 'le Champion'}`,
         { expectedKind: 'gym_challenge' }
       );
+
+      if (!submitted) {
+        state.gymCycle = {
+          ...gymCycle(),
+          phase: 'blocked',
+          challengeSubmittedDay: null,
+          reason: httpTransportState().lastError
+            ? `Défi HTTP refusé: ${httpTransportState().lastError}`
+            : 'Défi HTTP non soumis',
+        };
+        saveState(state);
+        updatePanel();
+      }
+
+      return submitted;
     }
 
     return clickElement(
