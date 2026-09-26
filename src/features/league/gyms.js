@@ -256,7 +256,7 @@ function leagueNeedsDailyCheck() {
   const today = localDayKey();
 
   if (gym.completedDay === today) return false;
-  if (gym.challengeSubmittedDay === today && gym.phase === 'challenging') return false;
+  if (gym.challengeSubmittedDay === today) return false;
 
   if (gym.phase === 'blocked' && gym.blockedUntil && gym.blockedUntil > now()) {
     return false;
@@ -290,24 +290,24 @@ async function handleLeagueAutomation() {
   if (!config.autoGyms) return false;
 
   if (isGymResultLikePage()) {
-    const returnLink = gymReturnToCircuitLink();
-    if (!returnLink) return false;
-
-    if (now() - (gymCycle().lastChallengeAt || 0) < 2500) {
-      return false;
-    }
-
     state.gymCycle = {
       ...gymCycle(),
       phase: 'result',
       checkedDay: localDayKey(),
       availableToday: false,
       completedDay: localDayKey(),
-      reason: 'Combat résolu — combat quotidien consommé, retour au Circuit',
+      reason: 'Combat résolu — combat quotidien consommé',
       lastCheckAt: now(),
     };
     saveState(state);
     updatePanel();
+
+    const returnLink = gymReturnToCircuitLink();
+    if (!returnLink) return false;
+
+    if (now() - (gymCycle().lastChallengeAt || 0) < 2500) {
+      return false;
+    }
 
     return clickElement(returnLink, 'Arène: retour au Circuit');
   }
@@ -318,13 +318,17 @@ async function handleLeagueAutomation() {
     const progress = parseGymProgress();
     const gym = availableGymContext();
 
-    if (gymCycle().completedDay === today) {
+    if (
+      gymCycle().completedDay === today ||
+      gymCycle().challengeSubmittedDay === today
+    ) {
       setGymCycle('done', {
         checkedDay: today,
         availableToday: false,
         badges: progress.badges,
         totalBadges: progress.totalBadges,
-        reason: 'Combat d’arène déjà résolu aujourd’hui',
+        completedDay: today,
+        reason: 'Combat d’arène déjà tenté aujourd’hui — nouvelle tentative bloquée',
       });
       return false;
     }
