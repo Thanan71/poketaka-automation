@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.2 - 2026-09-26
+
+- Correction du lancement d'expédition : le bot compose désormais l'équipe avant de soumettre le formulaire.
+- Utilisation prioritaire du bouton "Dernière équipe utilisée" quand il est disponible.
+- Fallback sur les sélecteurs `data-team-select` et les cartes `data-team-pokemon`.
+- Vérification du minimum d'équipe via `data-team-min` avant lancement.
+- En mode progression, priorité à la destination disponible la plus avancée qui respecte le seuil de réussite.
+- Avec Sentier du Professeur + Route 1 disponibles, Route 1 est désormais préférée si elle reste viable.
+
+
 ## 0.4.1 - 2026-09-26
 
 - Correction de la détection des expéditions lançables.
