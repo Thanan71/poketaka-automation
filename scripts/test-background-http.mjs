@@ -7,6 +7,7 @@ const teamSource = fs.readFileSync('src/features/expeditions/team.js', 'utf8');
 const catalogSource = fs.readFileSync('src/features/expeditions/catalog.js', 'utf8');
 const pokemonSource = fs.readFileSync('src/features/pokemon/progression.js', 'utf8');
 const panelSource = fs.readFileSync('src/ui/panel.js', 'utf8');
+const stateSource = fs.readFileSync('src/core/state.js', 'utf8');
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -97,6 +98,34 @@ assert(
   'background coordinator must not perform visible navigation or simulated clicks'
 );
 
+assert(
+  backgroundSource.includes('async function verifyBackgroundExpeditionLaunch') &&
+  backgroundSource.includes("fetchObservedPage('/expeditions'") &&
+  backgroundSource.includes("force: true") &&
+  backgroundSource.includes('attempt: 2'),
+  'silent expedition launch must be verified and retried once with fresh server state'
+);
+
+assert(
+  navigationSource.includes('backgroundExpeditionOwnsCycle') &&
+  navigationSource.includes("state.captureDecision?.action !== 'manual'"),
+  'silent background expedition handling must suppress visible expedition fallback unless manual intervention is required'
+);
+
+assert(
+  panelSource.includes('Journal d’actions') &&
+  panelSource.includes('data-action="view-logs"') &&
+  panelSource.includes('data-action="clear-logs"'),
+  'panel must expose a dedicated log page with clear action'
+);
+
+assert(
+  stateSource.includes('actionLog: []') &&
+  stateSource.includes('function appendActionLog') &&
+  stateSource.includes('.slice(0, 120)'),
+  'action log must persist and stay bounded'
+);
+
 console.log('Background GET whitelist: OK');
 console.log('Detached HTML parsing: OK');
 console.log('Expedition/league/collection background observation: OK');
@@ -105,3 +134,6 @@ console.log('Observed active-expedition selection sync: OK');
 console.log('Panel active mission precedence: OK');
 console.log('Fresh-route navigation suppression + fallback: OK');
 console.log('Background POST actions without page changes: OK');
+console.log('Silent expedition launch verification/retry: OK');
+console.log('Visible expedition redirect suppression: OK');
+console.log('Panel action log page: OK');
