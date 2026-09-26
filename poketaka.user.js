@@ -914,22 +914,17 @@
     }
 
     if (isExpeditionResultPage()) {
+      recordExpeditionOutcome();
+
       if (!['claiming', 'awaiting_capture'].includes(cycleState.phase)) {
         setExpeditionPhase('result');
       }
 
       if (resultPageHasPendingCapture()) {
-        if (config.autoCapture) {
-          const captured = await captureEncounter();
-          if (captured) {
-            setExpeditionPhase('claiming');
-            return true;
-          }
-        } else {
-          setExpeditionPhase('awaiting_capture');
-          state.lastAction = 'Capture en attente — intervention manuelle';
-          saveState(state);
-          updatePanel();
+        const handledCapture = await captureEncounter();
+        if (handledCapture) return true;
+
+        if (expeditionCycle().phase === 'awaiting_capture') {
           return false;
         }
       }
