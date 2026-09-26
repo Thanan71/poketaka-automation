@@ -556,6 +556,7 @@
 
   function expeditionCards() {
     const startPatterns = [
+      'preparer l expedition', 'preparer expedition',
       'lancer expedition', 'lancer l expedition', 'partir', 'demarrer',
       'start expedition', 'start', 'depart', 'envoyer equipe', 'send team',
     ];
@@ -716,6 +717,7 @@
     const newProgression = isNewProgression(text);
     const completed = isPreviouslyCompleted(text);
     const startButton = findClickable([
+      'preparer l expedition', 'preparer expedition',
       'lancer expedition', 'lancer l expedition', 'partir', 'demarrer',
       'start expedition', 'start', 'depart', 'envoyer equipe', 'send team',
     ], card, {
@@ -879,9 +881,15 @@
     saveState(state);
     updatePanel();
 
+    setExpeditionPhase('preparing', {
+      title: selected.title,
+      resultUrl: null,
+      dueAt: null,
+    });
+
     return clickElement(
       selected.button,
-      `Expédition optimale: ${selected.title} (score ${selected.score})`
+      `Préparation optimale: ${selected.title} (score ${selected.score})`
     );
   }
 
@@ -1346,6 +1354,19 @@
           reasons.push('équipe détectée KO/blessée');
         }
 
+        const expeditionState = expeditionCycle();
+        if (
+          module.id === 'expeditions' &&
+          ['due', 'ready_to_start'].includes(expeditionState.phase)
+        ) {
+          score += 1200;
+          reasons.push(
+            expeditionState.phase === 'due'
+              ? 'résultat d’expédition à récupérer'
+              : 'nouvelle expédition à lancer'
+          );
+        }
+
         return score > 0 ? { module, anchor, score, reasons } : null;
       })
       .filter(Boolean)
@@ -1383,14 +1404,12 @@
 
       const actions = [
         handleConfirmation,
-        claimExpedition,
+        handleExpeditionCycle,
         claimIncubator,
         claimBreeding,
         harvestGreenhouse,
-        captureEncounter,
         healTeam,
         autoProgression,
-        startExpedition,
         plantGreenhouse,
         navigateWhenNeeded,
       ];
