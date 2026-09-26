@@ -308,6 +308,141 @@ GM_addStyle(`
     #pta-panel .pta-badge.wait { background: var(--pta-amber-soft); color: #fde68a; }
     #pta-panel .pta-badge.current { background: var(--pta-blue-soft); color: #bfdbfe; }
     #pta-panel .pta-badge.danger { background: var(--pta-red-soft); color: #fecaca; }
+    #pta-panel .pta-badge.neutral { background: rgba(148,163,184,.10); color: #cbd5e1; }
+
+    #pta-panel .pta-capture-card {
+      margin-top: 9px;
+      padding: 11px;
+      border: 1px solid var(--pta-border);
+      border-radius: 13px;
+      background: linear-gradient(145deg, rgba(245,158,11,.055), rgba(255,255,255,.025));
+    }
+    #pta-panel .pta-capture-card[data-tone="ready"] {
+      border-color: rgba(34,197,94,.24);
+      background: linear-gradient(145deg, rgba(34,197,94,.08), rgba(255,255,255,.025));
+    }
+    #pta-panel .pta-capture-card[data-tone="danger"] {
+      border-color: rgba(239,68,68,.24);
+      background: linear-gradient(145deg, rgba(239,68,68,.08), rgba(255,255,255,.025));
+    }
+    #pta-panel .pta-capture-card[data-tone="wait"] {
+      border-color: rgba(245,158,11,.24);
+    }
+    #pta-panel .pta-capture-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    #pta-panel .pta-capture-title {
+      min-width: 0;
+      font-size: 12px;
+      font-weight: 790;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    #pta-panel .pta-capture-subtitle {
+      margin-top: 2px;
+      color: var(--pta-muted);
+      font-size: 9px;
+      font-weight: 650;
+    }
+    #pta-panel .pta-capture-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 6px;
+      margin-top: 9px;
+    }
+    #pta-panel .pta-capture-stat {
+      min-width: 0;
+      padding: 7px 8px;
+      border-radius: 9px;
+      background: rgba(255,255,255,.035);
+      border: 1px solid rgba(255,255,255,.055);
+    }
+    #pta-panel .pta-capture-stat strong {
+      display: block;
+      margin-top: 2px;
+      color: var(--pta-text);
+      font-size: 11px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    #pta-panel .pta-capture-reason {
+      margin-top: 8px;
+      color: #cbd5e1;
+      font-size: 10px;
+      line-height: 1.4;
+    }
+    #pta-panel .pta-capture-progress {
+      height: 5px;
+      margin-top: 8px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: rgba(255,255,255,.07);
+    }
+    #pta-panel .pta-capture-progress > span {
+      display: block;
+      height: 100%;
+      border-radius: inherit;
+      background: var(--pta-blue);
+    }
+    #pta-panel .pta-settings-note {
+      grid-column: 1 / -1;
+      color: var(--pta-muted);
+      font-size: 9px;
+      line-height: 1.45;
+      padding: 1px 2px 4px;
+    }
+    #pta-panel .pta-stepper {
+      grid-column: 1 / -1;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto auto;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 8px;
+      border: 1px solid var(--pta-border);
+      border-radius: 10px;
+      background: rgba(255,255,255,.025);
+    }
+    #pta-panel .pta-stepper-label {
+      min-width: 0;
+      color: #cbd5e1;
+      font-size: 10px;
+      font-weight: 650;
+    }
+    #pta-panel .pta-stepper-label small {
+      display: block;
+      margin-top: 1px;
+      color: var(--pta-muted);
+      font-size: 8px;
+      font-weight: 600;
+    }
+    #pta-panel .pta-stepper-value {
+      min-width: 35px;
+      text-align: center;
+      font-size: 10px;
+      font-weight: 800;
+    }
+    #pta-panel .pta-stepper-controls {
+      display: flex;
+      gap: 4px;
+    }
+    #pta-panel .pta-stepper-btn {
+      width: 24px;
+      height: 24px;
+      display: grid;
+      place-items: center;
+      border: 1px solid var(--pta-border);
+      border-radius: 8px;
+      background: rgba(255,255,255,.045);
+      color: var(--pta-text);
+      cursor: pointer;
+      font-weight: 800;
+    }
+    #pta-panel .pta-stepper-btn:hover { background: rgba(255,255,255,.09); }
 
     #pta-panel .pta-chip-row {
       display: flex;
