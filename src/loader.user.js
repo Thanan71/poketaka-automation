@@ -22,10 +22,44 @@
   'use strict';
 
   const SCRIPT_VERSION = GM_info?.script?.version || '__VERSION__';
-  const RUNTIME_URL = `https://raw.githubusercontent.com/Thanan71/poketaka-automation/main/dist/runtime.js?v=${encodeURIComponent(SCRIPT_VERSION)}`;
+  const RAW_BASE = 'https://raw.githubusercontent.com/Thanan71/poketaka-automation/main';
+  const VERSION_URL = `${RAW_BASE}/dist/version.json`;
+  const RUNTIME_URL = `${RAW_BASE}/dist/runtime.js`;
   const CACHE_KEY = 'poketaka-automation:runtime-cache';
+  const SEMVER = /^\d+\.\d+\.\d+$/;
 
-  function executeRuntime(code, source = RUNTIME_URL) {
+  function requestText(url) {
+    return new Promise((resolve, reject) => {
+      GM_xmlhttpRequest({
+        method: 'GET',
+        url,
+        timeout: 12000,
+        headers: {
+          'Cache-Control': 'no-cache',
+          Pragma: 'no-cache',
+        },
+        onload(response) {
+          if (response.status >= 200 && response.status < 300 && response.responseText) {
+            resolve(response.responseText);
+            return;
+          }
+          reject(new Error(`HTTP ${response.status}`));
+        },
+        onerror(error) {
+          reject(error instanceof Error ? error : new Error('network error'));
+        },
+        ontimeout() {
+          reject(new Error('timeout'));
+        },
+      });
+    });
+  }
+
+  function runtimeVersionFromCode(code) {
+    return code.match(/const VERSION = ["'](\d+\.\d+\.\d+)["']/)?.[1] || null;
+  }
+
+  function executeRuntime(code, source) {
     const runner = new Function(
       'GM_getValue',
       'GM_setValue',
@@ -49,43 +83,66 @@
   function runCachedRuntime(reason) {
     const cached = GM_getValue(CACHE_KEY, null);
     if (cached?.code) {
-      console.warn('[PokéTaka Loader] Runtime GitHub indisponible, cache local utilisé.', reason);
+      console.warn(
+        '[PokéTaka Loader] Runtime GitHub indisponible, cache local utilisé.',
+        reason
+      );
       executeRuntime(cached.code, 'poketaka-runtime-cache.js');
-      return;
+      return true;
     }
 
     console.error(
       '[PokéTaka Loader] Impossible de charger le runtime et aucun cache local n’est disponible.',
       reason
     );
+    return false;
   }
 
-  GM_xmlhttpRequest({
-    method: 'GET',
-    url: RUNTIME_URL,
-    timeout: 12000,
-    headers: {
-      'Cache-Control': 'no-cache',
-      Pragma: 'no-cache',
-    },
-    onload(response) {
-      if (response.status >= 200 && response.status < 300 && response.responseText) {
-        GM_setValue(CACHE_KEY, {
-          version: SCRIPT_VERSION,
-          fetchedAt: Date.now(),
-          code: response.responseText,
-        });
-        executeRuntime(response.responseText);
-        return;
+  async function latestPublishedVersion() {
+    try {
+      const cacheBust = Date.now();
+      const text = await requestText(`${VERSION_URL}?t=${cacheBust}`);
+      const version = String(JSON.parse(text)?.version || '').trim();
+      return SEMVER.test(version) ? version : SCRIPT_VERSION;
+    } catch (error) {
+      console.warn(
+        '[PokéTaka Loader] Version distante indisponible, version du loader utilisée.',
+        error
+      );
+      return SCRIPT_VERSION;
+    }
+  }
+
+  async function boot() {
+    const targetVersion = await latestPublishedVersion();
+
+    try {
+      const cacheBust = Date.now();
+      const source = `${RUNTIME_URL}?v=${encodeURIComponent(targetVersion)}&t=${cacheBust}`;
+      const code = await requestText(source);
+      const actualVersion = runtimeVersionFromCode(code);
+
+      if (!actualVersion || !SEMVER.test(actualVersion)) {
+        throw new Error('Runtime sans version X.X.X valide');
       }
 
-      runCachedRuntime(`HTTP ${response.status}`);
-    },
-    onerror(error) {
+      GM_setValue(CACHE_KEY, {
+        version: actualVersion,
+        fetchedAt: Date.now(),
+        code,
+      });
+
+      if (actualVersion !== SCRIPT_VERSION) {
+        console.info(
+          `[PokéTaka Loader] Loader ${SCRIPT_VERSION} · runtime ${actualVersion}`
+        );
+      }
+
+      executeRuntime(code, source);
+    } catch (error) {
       runCachedRuntime(error);
-    },
-    ontimeout() {
-      runCachedRuntime('timeout');
-    },
-  });
+    }
+  }
+
+  boot();
 })();
