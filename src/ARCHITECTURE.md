@@ -9,7 +9,8 @@ La logique métier ne doit plus y être ajoutée.
 - `src/core/state.js` — état persistant et primitives communes.
 - `src/core/dom.js` — détection et clics DOM sûrs.
 - `src/features/expeditions/team.js` — snapshot du roster, efficacité des types, viabilité et composition d'équipe.
-- `src/features/expeditions/cycle.js` — machine d'état expédition, résultats et captures.
+- `src/features/expeditions/capture.js` — détection des rencontres, contexte de capture, décisions et exécution.
+- `src/features/expeditions/cycle.js` — machine d'état expédition et résultats.
 - `src/features/expeditions/catalog.js` — catalogue, scoring mission + équipe et stratégie de choix.
 - `src/features/activities.js` — soins, serre, incubateur et pension.
 - `src/core/navigation.js` — timers, navigation intelligente, orchestrateur et scheduler.
