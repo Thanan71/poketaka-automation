@@ -2597,6 +2597,37 @@
           </div>
         </details>
 
+        <details data-section="intelligence" ${detailsState.intelligence ? 'open' : ''}>
+          <summary>Décisions intelligentes</summary>
+          <div class="pta-modules">
+            <div class="pta-module">
+              <span class="pta-mini-dot current"></span>
+              <span class="pta-module-name">Orchestrateur</span>
+              <span class="pta-module-status" title="${escapeHtml(state.orchestrator?.lastReason || '')}">
+                ${escapeHtml(state.orchestrator?.lastDecision || 'En attente')}
+              </span>
+            </div>
+            <div class="pta-module">
+              <span class="pta-mini-dot"></span>
+              <span class="pta-module-name">Équipe</span>
+              <span class="pta-module-status">
+                ${escapeHtml((state.smartTeam?.lastSelection || []).slice(-3).join(', ') || '—')}
+              </span>
+            </div>
+            <div class="pta-module">
+              <span class="pta-mini-dot ${state.captureDecision?.action === 'capture' ? 'ready' : ''}"></span>
+              <span class="pta-module-name">Capture</span>
+              <span class="pta-module-status" title="${escapeHtml(state.captureDecision?.reason || '')}">
+                ${escapeHtml(
+                  state.captureDecision?.species
+                    ? `${state.captureDecision.species}: ${state.captureDecision.action}`
+                    : '—'
+                )}
+              </span>
+            </div>
+          </div>
+        </details>
+
         <details data-section="settings" ${detailsState.settings ? 'open' : ''}>
           <summary>Réglages automatiques</summary>
           <div class="pta-settings">
@@ -2607,12 +2638,17 @@
             ${optionButton('autoIncubatorClaim', 'Incubateur')}
             ${optionButton('autoBreedingClaim', 'Pension')}
             ${optionButton('autoProgression', 'Progression')}
-            ${optionButton('autoCapture', 'Captures')}
+            ${optionButton('smartTeam', 'Équipe intelligente')}
+            ${optionButton('autoCapture', 'Captures auto')}
+            ${optionButton('smartCapture', 'Capture intelligente')}
+            ${optionButton('captureNewSpecies', 'Nouvelles espèces')}
+            ${optionButton('captureRare', 'Rares')}
+            ${optionButton('captureUnknownEncounters', 'Captures inconnues')}
             ${optionButton('autoPlant', 'Replanter')}
           </div>
         </details>
 
-        <div class="pta-footer">Navigation intelligente · progression-first · actions destructrices bloquées</div>
+        <div class="pta-footer">Orchestrateur v0.7 · équipe intelligente · captures prudentes · actions destructrices bloquées</div>
       </div>
     `;
   }
