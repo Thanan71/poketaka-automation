@@ -136,6 +136,8 @@
         reason: null,
         species: null,
       },
+      expeditionStats: {},
+      lastRecordedResultUrl: null,
       orchestrator: {
         lastDecision: null,
         lastReason: null,
