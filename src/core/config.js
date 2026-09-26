@@ -43,8 +43,8 @@ const STORAGE_KEY = 'poketaka-automation:config';
 
   const MODULES = [
     { id: 'expeditions', label: 'Expéditions', keywords: ['expedition', 'expeditions', 'exploration'] },
-    { id: 'pokemon', label: 'Pokémon', keywords: ['collection', 'mes pokemon', 'pokemon'] },
     { id: 'healing', label: 'Soins', keywords: ['centre pokemon', 'pokemon center', 'soins', 'heal'] },
+    { id: 'pokemon', label: 'Pokémon', keywords: ['collection', 'mes pokemon'] },
     { id: 'greenhouse', label: 'Serre', keywords: ['serre', 'greenhouse'] },
     { id: 'incubator', label: 'Incubateur', keywords: ['incubateur', 'incubator', 'oeufs', 'eggs', 'fossiles', 'fossils'] },
     { id: 'breeding', label: 'Pension', keywords: ['pension', 'daycare', 'elevage', 'breeding'] },
