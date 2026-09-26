@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PokéTaka Automation
 // @namespace    https://github.com/Thanan71/poketaka-automation
-// @version      0.4.1
+// @version      0.4.2
 // @description  Assistant d'automatisation DOM pour PokéTaka : expéditions, récompenses, soins, serre et progression.
 // @author       Thanan71
 // @match        https://poketaka.fr/*
@@ -16,7 +16,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.4.1';
+  const VERSION = '0.4.2';
   const STORAGE_KEY = 'poketaka-automation:config';
   const STATE_KEY = 'poketaka-automation:state';
 
@@ -332,11 +332,71 @@
     return clickElement(link, 'Retour aux expéditions');
   }
 
+  function expeditionTeamRequirement() {
+    const form = document.querySelector('form.expedition-prep[data-team-builder]');
+    if (!form) return null;
+
+    const min = Number(form.getAttribute('data-team-min') || 1);
+    const max = Number(form.getAttribute('data-team-max') || min);
+    const selected = [...form.querySelectorAll('[data-team-select]')]
+      .filter(select => select.value)
+      .length;
+
+    return { form, min, max, selected };
+  }
+
+  function selectFirstAvailablePokemon(requirement) {
+    if (!requirement?.form) return false;
+
+    const selects = [...requirement.form.querySelectorAll('select[data-team-select]')];
+    for (const select of selects) {
+      if (select.value) continue;
+      const option = [...select.options].find(item => !item.disabled && item.value);
+      if (!option) continue;
+
+      select.value = option.value;
+      select.dispatchEvent(new Event('input', { bubbles: true }));
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      return true;
+    }
+
+    const card = requirement.form.querySelector('[data-team-pokemon][data-pokemon-id]');
+    if (card && isVisible(card)) {
+      card.click();
+      return true;
+    }
+
+    return false;
+  }
+
   async function handleExpeditionPreparation() {
     if (!config.autoStartExpeditions) return false;
 
-    const cycleState = expeditionCycle();
-    if (cycleState.phase === 'starting' && recentBotAction(5000)) {
+    const requirement = expeditionTeamRequirement();
+
+    // La page PokéTaka expose "Dernière équipe utilisée". C'est le chemin
+    // privilégié car il réapplique exactement une composition déjà valide.
+    if (requirement && requirement.selected < requirement.min) {
+      const lastTeamButton = document.querySelector(
+        'button[data-last-expedition-team][data-last-team-ids]'
+      );
+
+      if (lastTeamButton && isVisible(lastTeamButton)) {
+        setExpeditionPhase('preparing');
+        return clickElement(lastTeamButton, 'Application de la dernière équipe');
+      }
+
+      if (selectFirstAvailablePokemon(requirement)) {
+        state.lastAction = 'Pokémon disponible ajouté à l’expédition';
+        state.lastActionAt = now();
+        saveState(state);
+        updatePanel();
+        return true;
+      }
+
+      state.lastAction = `Préparation bloquée — équipe ${requirement.selected}/${requirement.min}`;
+      saveState(state);
+      updatePanel();
       return false;
     }
 
@@ -356,56 +416,10 @@
     });
 
     if (launchButton) {
+      if (recentBotAction(1800)) return false;
       setExpeditionPhase('starting');
       return clickElement(launchButton, 'Lancement de l’expédition');
     }
-
-    const checkedTeam = document.querySelector(
-      'input[type="radio"][name*="team" i]:checked, input[type="radio"][name*="equipe" i]:checked'
-    );
-    const teamRadio = [...document.querySelectorAll(
-      'input[type="radio"][name*="team" i], input[type="radio"][name*="equipe" i]'
-    )].find(input => !input.disabled);
-
-    if (teamRadio && !checkedTeam) {
-      const label = teamRadio.id
-        ? document.querySelector(`label[for="${CSS.escape(teamRadio.id)}"]`)
-        : null;
-      (label || teamRadio).click();
-      teamRadio.dispatchEvent(new Event('change', { bubbles: true }));
-      state.lastAction = 'Équipe disponible sélectionnée';
-      state.lastActionAt = now();
-      saveState(state);
-      updatePanel();
-      return true;
-    }
-
-    const teamSelect = [...document.querySelectorAll(
-      'select[name*="team" i], select[name*="equipe" i]'
-    )].find(select => !select.disabled);
-
-    if (teamSelect && !teamSelect.value) {
-      const option = [...teamSelect.options].find(item => !item.disabled && item.value);
-      if (option) {
-        teamSelect.value = option.value;
-        teamSelect.dispatchEvent(new Event('change', { bubbles: true }));
-        state.lastAction = 'Équipe disponible sélectionnée';
-        state.lastActionAt = now();
-        saveState(state);
-        updatePanel();
-        return true;
-      }
-    }
-
-    const teamButton = findClickable([
-      'choisir cette equipe',
-      'selectionner cette equipe',
-      'utiliser cette equipe',
-      'choose this team',
-      'select team',
-      'use this team',
-    ]);
-    if (teamButton) return clickElement(teamButton, 'Sélection équipe expédition');
 
     return false;
   }
