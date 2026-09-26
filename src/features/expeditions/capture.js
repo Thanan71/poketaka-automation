@@ -366,6 +366,21 @@ async function captureEncounter() {
 
   const decision = decideCapture(context);
   state.captureDecision = captureDecisionSnapshot(context, decision);
+
+  if (decision.action === 'ignore' || decision.action === 'manual') {
+    appendActionLog(
+      decision.action === 'manual' ? 'warning' : 'info',
+      'capture',
+      `${decision.action === 'manual' ? 'Capture manuelle' : 'Capture ignorée'}: ${context.species}`,
+      {
+        reason: decision.reason,
+        isNew: context.isNew,
+        rarity: context.rarity,
+        ivScore: context.ivScore,
+      }
+    );
+  }
+
   saveState(state);
   updatePanel();
 
