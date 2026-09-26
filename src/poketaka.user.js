@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PokéTaka Automation
 // @namespace    https://github.com/Thanan71/poketaka-automation
-// @version      0.1.0
+// @version      0.2.0
 // @description  Assistant d'automatisation DOM pour PokéTaka : expéditions, récompenses, soins, serre et progression.
 // @author       Thanan71
 // @match        https://poketaka.fr/*
@@ -16,7 +16,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.0';
+  const VERSION = '0.2.0';
   const STORAGE_KEY = 'poketaka-automation:config';
   const STATE_KEY = 'poketaka-automation:state';
 
@@ -31,6 +31,9 @@
     autoIncubatorClaim: true,
     autoBreedingClaim: true,
     autoProgression: true,
+    strategy: 'progression',
+    minSuccessChance: 55,
+    avoidLongLowValue: true,
     autoCapture: false,
     autoPlant: false,
     debug: true,
@@ -81,6 +84,8 @@
       lastBotClickAt: 0,
       navIndex: 0,
       actions: 0,
+      selectedExpedition: null,
+      selectedExpeditionScore: null,
       ...(GM_getValue(STATE_KEY, {}) || {}),
     };
   }
@@ -267,44 +272,334 @@
   }
 
   function expeditionCards() {
-    const candidates = [...document.querySelectorAll('article, section, li, .card, [class*="card"], [class*="expedition"]')]
-      .filter(isVisible)
-      .filter(el => {
-        const text = elementText(el);
-        return text.includes('expedition') || text.includes('route') || text.includes('chemin') || text.includes('path');
-      });
-
-    const seen = new Set();
-    return candidates.filter(el => {
-      const key = el.textContent?.slice(0, 150);
-      if (!key || seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-  }
-
-  async function startExpedition() {
-    if (!config.autoStartExpeditions) return false;
-
-    const cards = expeditionCards();
     const startPatterns = [
       'lancer expedition', 'lancer l expedition', 'partir', 'demarrer',
       'start expedition', 'start', 'depart', 'envoyer equipe', 'send team',
     ];
 
-    // Progression-first: prend le dernier contenu disponible dans le DOM.
-    for (const card of [...cards].reverse()) {
-      const button = findClickable(startPatterns, card, {
+    const candidates = [...document.querySelectorAll(
+      'article, section, li, .card, [class*="card"], [class*="expedition"], [data-expedition], [data-route]'
+    )]
+      .filter(isVisible)
+      .filter(el => findClickable(startPatterns, el, {
         exclude: ['verrouille', 'locked', 'indisponible', 'unavailable'],
-      });
-      if (button) return clickElement(button, 'Lancement expédition');
+      }));
+
+    const seen = new Set();
+    return candidates.filter(el => {
+      const text = elementText(el);
+      if (!text || seen.has(text)) return false;
+      seen.add(text);
+      return true;
+    });
+  }
+
+  function parseNumber(value) {
+    if (value == null) return null;
+    const normalized = String(value).replace(/\s/g, '').replace(',', '.');
+    const number = Number(normalized);
+    return Number.isFinite(number) ? number : null;
+  }
+
+  function parseFirstMatch(text, patterns) {
+    for (const pattern of patterns) {
+      const match = text.match(pattern);
+      if (match) return parseNumber(match[1]);
+    }
+    return null;
+  }
+
+  function parseDurationMinutes(text) {
+    let minutes = 0;
+    const hours = text.match(/(\d+(?:[.,]\d+)?)\s*(?:h|heure|heures|hour|hours)\b/i);
+    const mins = text.match(/(\d+(?:[.,]\d+)?)\s*(?:min|minute|minutes)\b/i);
+    const secs = text.match(/(\d+(?:[.,]\d+)?)\s*(?:s|sec|seconde|secondes|second|seconds)\b/i);
+
+    if (hours) minutes += (parseNumber(hours[1]) || 0) * 60;
+    if (mins) minutes += parseNumber(mins[1]) || 0;
+    if (secs) minutes += (parseNumber(secs[1]) || 0) / 60;
+
+    return minutes > 0 ? minutes : null;
+  }
+
+  function parseChance(text) {
+    const contextual = parseFirstMatch(text, [
+      /(?:chance|succes|reussite|victoire|success|win chance)[^%\d]{0,20}(\d+(?:[.,]\d+)?)\s*%/i,
+      /(\d+(?:[.,]\d+)?)\s*%[^a-z]{0,8}(?:chance|succes|reussite|victoire|success)/i,
+    ]);
+    if (contextual != null) return Math.max(0, Math.min(100, contextual));
+
+    const percentages = [...text.matchAll(/(\d+(?:[.,]\d+)?)\s*%/g)]
+      .map(match => parseNumber(match[1]))
+      .filter(value => value != null && value >= 0 && value <= 100);
+
+    return percentages.length === 1 ? percentages[0] : null;
+  }
+
+  function parseRequiredLevel(text) {
+    return parseFirstMatch(text, [
+      /(?:niveau|niv\.?|level|lvl\.?)\s*(?:requis|required|minimum|min)?\s*[:≥>=-]*\s*(\d+)/i,
+      /(?:requis|required)\s*(?:niveau|level|lvl\.?)?\s*[:≥>=-]*\s*(\d+)/i,
+    ]);
+  }
+
+  function parseTeamLevel(pageText) {
+    return parseFirstMatch(pageText, [
+      /(?:niveau moyen|niveau equipe|moyenne equipe|average level|team level)\s*[:=-]*\s*(\d+(?:[.,]\d+)?)/i,
+      /(?:equipe|team)[^\n]{0,30}(?:niv\.?|lvl\.?|niveau|level)\s*[:=-]*\s*(\d+(?:[.,]\d+)?)/i,
+    ]);
+  }
+
+  function parseRewardValue(text) {
+    let score = 0;
+
+    const moneyMatches = [...text.matchAll(
+      /(\d[\d\s.,]*)\s*(?:₽|pok(?:e|é)dollars?|pokedollars?|coins?|pieces?)/gi
+    )];
+    for (const match of moneyMatches) {
+      const amount = parseNumber(match[1]);
+      if (amount) score += Math.log10(amount + 10) * 18;
     }
 
-    const fallback = findAllClickables(startPatterns, document, {
+    const xpMatches = [...text.matchAll(
+      /(\d[\d\s.,]*)\s*(?:xp|exp(?:erience)?)/gi
+    )];
+    for (const match of xpMatches) {
+      const amount = parseNumber(match[1]);
+      if (amount) score += Math.log10(amount + 10) * 16;
+    }
+
+    const quantityMatches = [...text.matchAll(/(?:x\s*)?(\d+)\s+(?:objet|item|baie|berry|ball|bonbon|candy)/gi)];
+    for (const match of quantityMatches) score += Math.min(30, (parseNumber(match[1]) || 0) * 4);
+
+    if (/rare|epique|epic|legendaire|legendary|fossile|fossil|oeuf|egg/i.test(text)) score += 20;
+    return score;
+  }
+
+  function parseResourceCost(text) {
+    return {
+      energy: parseFirstMatch(text, [
+        /(?:cout|cost|consomme|consume)[^\d]{0,12}(\d+(?:[.,]\d+)?)\s*(?:energie|energy|stamina)/i,
+        /(\d+(?:[.,]\d+)?)\s*(?:energie|energy|stamina)\s*(?:requis|required|cout|cost)/i,
+      ]),
+    };
+  }
+
+  function parseAvailableResources(pageText) {
+    return {
+      energy: parseFirstMatch(pageText, [
+        /(?:energie|energy|stamina)\s*[:=-]?\s*(\d+(?:[.,]\d+)?)(?:\s*\/\s*\d+)?/i,
+      ]),
+    };
+  }
+
+  function zoneRank(text, domIndex) {
+    const numbered = parseFirstMatch(text, [
+      /(?:route|zone|chemin|path|stage|etape)\s*#?\s*(\d+)/i,
+      /(?:arene|gym|badge)\s*#?\s*(\d+)/i,
+    ]);
+
+    let rank = numbered != null ? numbered * 10 : domIndex;
+    if (/ligue|league|elite\s*4|conseil\s*4/i.test(text)) rank += 500;
+    if (/champion/i.test(text)) rank += 700;
+    return rank;
+  }
+
+  function expeditionTitle(card, index) {
+    const heading = card.querySelector('h1, h2, h3, h4, h5, strong, [class*="title"]');
+    const title = normalizeText(heading?.textContent || '').trim();
+    if (title) return title.slice(0, 80);
+
+    const text = normalizeText(card.textContent || '');
+    return text.slice(0, 80) || `expedition ${index + 1}`;
+  }
+
+  function isNewProgression(text) {
+    return /nouveau|nouvelle|new|premiere fois|first clear|non termine|uncompleted|a decouvrir|undiscovered/i.test(text);
+  }
+
+  function isPreviouslyCompleted(text) {
+    return /termine|complete|completed|deja termine|already cleared|maitrise|mastered/i.test(text);
+  }
+
+  function analyzeExpedition(card, index, pageContext) {
+    const text = normalizeText(card.innerText || card.textContent || '');
+    const chance = parseChance(text);
+    const durationMinutes = parseDurationMinutes(text);
+    const requiredLevel = parseRequiredLevel(text);
+    const rewardScore = parseRewardValue(text);
+    const costs = parseResourceCost(text);
+    const progressionRank = zoneRank(text, index);
+    const newProgression = isNewProgression(text);
+    const completed = isPreviouslyCompleted(text);
+    const startButton = findClickable([
+      'lancer expedition', 'lancer l expedition', 'partir', 'demarrer',
+      'start expedition', 'start', 'depart', 'envoyer equipe', 'send team',
+    ], card, {
       exclude: ['verrouille', 'locked', 'indisponible', 'unavailable'],
     });
-    if (!fallback.length) return false;
-    return clickElement(fallback[fallback.length - 1], 'Lancement expédition');
+
+    let score = progressionRank * 6;
+    const reasons = [];
+
+    if (newProgression) {
+      score += 180;
+      reasons.push('+180 nouvelle progression');
+    }
+
+    if (completed) {
+      score -= 45;
+      reasons.push('-45 déjà terminée');
+    }
+
+    if (chance != null) {
+      score += chance * 1.6;
+      reasons.push(`+${Math.round(chance * 1.6)} chance ${chance}%`);
+
+      if (chance < config.minSuccessChance) {
+        score -= (config.minSuccessChance - chance) * 7;
+        reasons.push(`risque élevé (<${config.minSuccessChance}%)`);
+      }
+
+      if (chance < 30) {
+        score -= 500;
+        reasons.push('-500 chance critique');
+      }
+    } else {
+      score += 60;
+      reasons.push('+60 chance inconnue');
+    }
+
+    if (requiredLevel != null && pageContext.teamLevel != null) {
+      const delta = pageContext.teamLevel - requiredLevel;
+      if (delta >= 0) {
+        score += Math.min(80, delta * 8 + 20);
+        reasons.push(`niveau OK +${Math.round(delta)}`);
+      } else {
+        score -= Math.min(350, Math.abs(delta) * 45);
+        reasons.push(`niveau insuffisant ${Math.round(delta)}`);
+      }
+    }
+
+    score += rewardScore;
+    if (rewardScore > 0) reasons.push(`+${Math.round(rewardScore)} récompenses`);
+
+    if (durationMinutes != null) {
+      const speedBonus = Math.max(-100, 90 - Math.log2(durationMinutes + 1) * 18);
+      score += speedBonus;
+      reasons.push(`${speedBonus >= 0 ? '+' : ''}${Math.round(speedBonus)} durée ${Math.round(durationMinutes)} min`);
+
+      if (config.avoidLongLowValue && durationMinutes >= 240 && rewardScore < 35 && !newProgression) {
+        score -= 120;
+        reasons.push('-120 longue/faible valeur');
+      }
+    }
+
+    if (
+      costs.energy != null &&
+      pageContext.resources.energy != null &&
+      costs.energy > pageContext.resources.energy
+    ) {
+      score -= 1000;
+      reasons.push('-1000 énergie insuffisante');
+    }
+
+    if (/verrouille|locked|indisponible|unavailable|equipe occupee|team busy/i.test(text)) {
+      score -= 2000;
+      reasons.push('-2000 indisponible');
+    }
+
+    return {
+      card,
+      button: startButton,
+      index,
+      title: expeditionTitle(card, index),
+      chance,
+      durationMinutes,
+      requiredLevel,
+      teamLevel: pageContext.teamLevel,
+      rewardScore: Math.round(rewardScore),
+      progressionRank,
+      newProgression,
+      completed,
+      energyCost: costs.energy,
+      energyAvailable: pageContext.resources.energy,
+      score: Math.round(score),
+      reasons,
+    };
+  }
+
+  function rankExpeditions() {
+    const cards = expeditionCards();
+    const pageText = normalizeText(document.body?.innerText || '');
+    const pageContext = {
+      teamLevel: parseTeamLevel(pageText),
+      resources: parseAvailableResources(pageText),
+    };
+
+    const ranking = cards
+      .map((card, index) => analyzeExpedition(card, index, pageContext))
+      .filter(item => item.button)
+      .sort((a, b) => b.score - a.score);
+
+    if (config.debug && ranking.length) {
+      console.table(ranking.map(item => ({
+        expedition: item.title,
+        score: item.score,
+        zone: item.progressionRank,
+        chance: item.chance ?? '?',
+        niveauRequis: item.requiredLevel ?? '?',
+        niveauEquipe: item.teamLevel ?? '?',
+        dureeMin: item.durationMinutes != null ? Math.round(item.durationMinutes) : '?',
+        recompenses: item.rewardScore,
+        energie: item.energyCost ?? '?',
+        nouvelle: item.newProgression,
+        terminee: item.completed,
+      })));
+      log('Classement expéditions', ranking.map(item => ({
+        title: item.title,
+        score: item.score,
+        reasons: item.reasons,
+      })));
+    }
+
+    return ranking;
+  }
+
+  async function startExpedition() {
+    if (!config.autoStartExpeditions) return false;
+
+    const ranking = rankExpeditions();
+    if (!ranking.length) {
+      state.selectedExpedition = null;
+      state.selectedExpeditionScore = null;
+      saveState(state);
+      updatePanel();
+      return false;
+    }
+
+    let selected = ranking[0];
+
+    // En mode progression, une nouvelle zone viable est toujours préférée
+    // à du farming si elle reste dans une plage de risque raisonnable.
+    if (config.strategy === 'progression') {
+      const viableNewProgression = ranking.find(item =>
+        item.newProgression &&
+        (item.chance == null || item.chance >= config.minSuccessChance) &&
+        (item.requiredLevel == null || item.teamLevel == null || item.teamLevel >= item.requiredLevel)
+      );
+      if (viableNewProgression) selected = viableNewProgression;
+    }
+
+    state.selectedExpedition = selected.title;
+    state.selectedExpeditionScore = selected.score;
+    saveState(state);
+    updatePanel();
+
+    return clickElement(
+      selected.button,
+      `Expédition optimale: ${selected.title} (score ${selected.score})`
+    );
   }
 
   async function autoProgression() {
@@ -467,7 +762,12 @@
       <button class="pta-main" data-action="enabled" data-on="${config.enabled}">
         ${config.enabled ? 'AUTOMATISATION ACTIVE' : 'AUTOMATISATION ARRÊTÉE'}
       </button>
-      <div class="pta-status">Dernière action : <strong>${state.lastAction}</strong><br>Actions : ${state.actions}</div>
+      <div class="pta-status">
+        Dernière action : <strong>${state.lastAction}</strong><br>
+        Actions : ${state.actions}<br>
+        Cible : <strong>${state.selectedExpedition || '—'}</strong>
+        ${state.selectedExpeditionScore != null ? `(score ${state.selectedExpeditionScore})` : ''}
+      </div>
       <div class="pta-grid">
         ${optionButton('autoClaimExpeditions', 'Récompenses')}
         ${optionButton('autoStartExpeditions', 'Expéditions')}
@@ -486,6 +786,24 @@
 
   GM_registerMenuCommand('Activer / désactiver PokéTaka Automation', () => setEnabled(!config.enabled));
   GM_registerMenuCommand('Exécuter un cycle maintenant', () => cycle());
+  GM_registerMenuCommand('Afficher le classement des expéditions', () => {
+    const ranking = rankExpeditions();
+    if (!ranking.length) {
+      console.info('[PokéTaka Auto] Aucune expédition lançable détectée sur cette page.');
+      return;
+    }
+    console.table(ranking.map(item => ({
+      expedition: item.title,
+      score: item.score,
+      chance: item.chance ?? '?',
+      niveauRequis: item.requiredLevel ?? '?',
+      niveauEquipe: item.teamLevel ?? '?',
+      dureeMin: item.durationMinutes != null ? Math.round(item.durationMinutes) : '?',
+      recompenses: item.rewardScore,
+      nouvelle: item.newProgression,
+      raisons: item.reasons.join(' | '),
+    })));
+  });
   GM_registerMenuCommand('Réinitialiser la configuration', () => {
     config = { ...DEFAULT_CONFIG };
     saveConfig(config);
