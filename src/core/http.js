@@ -176,6 +176,12 @@ async function fetchObservedPage(
       lastStatus: 'error',
       lastError: message,
     });
+    appendActionLog(
+      'error',
+      'background',
+      `GET arrière-plan échoué: ${url.pathname}`,
+      message
+    );
     log('GET background en échec', url.pathname, message);
     return null;
   } finally {
@@ -302,6 +308,13 @@ function recordDirectAction(actionName, kind, endpoint) {
     lastStatus: 'pending',
     lastError: null,
   });
+
+  appendActionLog(
+    'info',
+    'http',
+    actionName,
+    { method: 'POST', kind, endpoint, status: 'pending' }
+  );
 }
 
 function finalizeDirectNavigation(response) {
@@ -419,6 +432,17 @@ async function submitObservedForm(
       state.lastAction = `${actionName} — échec: ${message}`;
       saveState(state);
       updatePanel();
+      appendActionLog(
+        'error',
+        'http',
+        `${actionName} — échec`,
+        {
+          endpoint: url.pathname,
+          kind,
+          status: response.status,
+          message,
+        }
+      );
       log('HTTP direct en échec', {
         kind,
         endpoint: url.pathname,
@@ -432,6 +456,19 @@ async function submitObservedForm(
       lastStatus: response.status,
       lastError: null,
     });
+
+    appendActionLog(
+      'success',
+      'http',
+      `${actionName} — réussi`,
+      {
+        endpoint: url.pathname,
+        kind,
+        status: response.status,
+        finalUrl: response.url,
+        navigate,
+      }
+    );
 
     log('HTTP direct réussi', {
       kind,
@@ -451,6 +488,16 @@ async function submitObservedForm(
     state.lastAction = `${actionName} — erreur HTTP: ${message}`;
     saveState(state);
     updatePanel();
+    appendActionLog(
+      'error',
+      'http',
+      `${actionName} — erreur réseau`,
+      {
+        endpoint: url.pathname,
+        kind,
+        message,
+      }
+    );
     console.error('[PokéTaka Auto] HTTP direct', kind, error);
     return false;
   } finally {
@@ -477,6 +524,12 @@ function navigateDirectly(urlLike, actionName) {
   state.lastAction = actionName;
   state.lastNavigationAt = now();
   state.actions += 1;
+  appendActionLog(
+    'info',
+    'navigation',
+    actionName,
+    { target: url.pathname }
+  );
   saveState(state);
   updatePanel();
 
