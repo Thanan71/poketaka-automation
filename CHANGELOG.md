@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.9.1 - 2026-09-26
+
+- Automatisation intelligente du renforcement des Pokémon.
+- Automatisation des évolutions à chemin unique lorsque toutes les conditions affichées sont remplies.
+- Les évolutions à plusieurs branches restent toujours manuelles.
+- Le bot analyse la collection et privilégie les Pokémon présents dans les plans d'expédition ou d'Arène.
+- Lorsqu'une expédition est en cours, toute dépense de progression Pokémon est suspendue jusqu'à son retour.
+- Lorsqu'un plan d'équipe existe, aucun Pokémon secondaire hors plan ne reçoit automatiquement de ressources.
+- Les Pokémon participant déjà à une activité sont ignorés.
+- Les renforcements se font un niveau à la fois afin de recalculer la stratégie après chaque dépense.
+- Réserve minimale de Poussière Étoile configurable (500 par défaut).
+- Les Bonbons nécessaires à une évolution unique en attente sont protégés et ne sont pas consommés en renforcement.
+- Nouvelle section "Progression Pokémon" dans le panel avec état, cible, raison et réglages.
+- Intégration du module Pokémon dans la navigation et l'orchestrateur.
+- Ajout de tests CI pour l'attente d'expédition, le ciblage des Pokémon utiles et les protections de ressources.
+
+
 ## 0.9.0 - 2026-09-26
 
 - Ajout d'un snapshot global persistant du compte.
