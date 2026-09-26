@@ -331,6 +331,7 @@ async function submitObservedForm(
     overrides = {},
     expectedKind = null,
     navigate = true,
+    moduleId = null,
   } = {}
 ) {
   if (!config.directHttpActions) return false;
@@ -377,6 +378,7 @@ async function submitObservedForm(
 
   directRequestInFlight = true;
   recordDirectAction(actionName, kind, url.pathname);
+  if (moduleId) markModuleAction(moduleId);
 
   try {
     const response = await fetch(url.href, {
