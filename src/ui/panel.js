@@ -193,6 +193,18 @@ GM_addStyle(`
       border-radius: 11px;
       background: rgba(96,165,250,.07);
     }
+    #pta-panel .pta-next[data-tone="ready"] {
+      border-color: rgba(34,197,94,.22);
+      background: rgba(34,197,94,.075);
+    }
+    #pta-panel .pta-next[data-tone="danger"] {
+      border-color: rgba(239,68,68,.25);
+      background: rgba(239,68,68,.075);
+    }
+    #pta-panel .pta-next[data-tone="wait"] {
+      border-color: rgba(245,158,11,.22);
+      background: rgba(245,158,11,.065);
+    }
     #pta-panel .pta-next-row {
       display: flex;
       align-items: center;
@@ -623,12 +635,28 @@ GM_addStyle(`
       };
     }
 
+    let preview = null;
+    try {
+      preview = orchestratorPlan()?.[0] || null;
+    } catch {
+      preview = null;
+    }
+
+    if (preview) {
+      return {
+        title: preview.name.replace(/^navigation:/, 'Navigation · '),
+        reason: preview.reason || 'Action prioritaire sélectionnée par l’orchestrateur.',
+        tone: preview.priority >= 9000 ? 'ready' : 'current',
+        icon: '→',
+      };
+    }
+
     if (decision && decision !== 'wait') {
       return {
         title: decision.replace(/^navigation:/, 'Navigation · '),
-        reason: reason || 'Action prioritaire sélectionnée par l’orchestrateur.',
+        reason: reason || 'Dernière décision de l’orchestrateur.',
         tone: 'current',
-        icon: '→',
+        icon: '↺',
       };
     }
 
@@ -703,12 +731,16 @@ GM_addStyle(`
         console.table(ranking.map(item => ({
           expedition: item.title,
           score: item.score,
-          chance: item.chance ?? '?',
-          niveauRequis: item.requiredLevel ?? '?',
-          niveauEquipe: item.teamLevel ?? '?',
+          progression: item.progressionRank,
+          niveauConseille: item.requiredLevel ?? '?',
+          equipe: item.teamPlan?.known
+            ? item.teamPlan.team.map(pokemon => pokemon.name).join(', ') || 'aucune'
+            : 'à confirmer',
+          equipeViable: item.teamPlan?.viable ?? '?',
+          scoreEquipe: item.teamPlan?.teamScore ?? '?',
+          rencontre: item.chance != null ? item.chance + '%' : '?',
           dureeMin: item.durationMinutes != null ? Math.round(item.durationMinutes) : '?',
-          recompenses: item.rewardScore,
-          nouvelle: item.newProgression,
+          echecs: item.failureStreak,
           raisons: item.reasons.join(' | '),
         })));
         state.lastAction = `Classement affiché (${ranking.length} expéditions)`;
@@ -923,7 +955,7 @@ GM_addStyle(`
           </div>
         </details>
 
-        <details data-section="intelligence" ${detailsState.intelligence ? 'open' : ''}>
+        <details data-section="intelligence" ${detailsState.intelligence !== false ? 'open' : ''}>
           <summary>
             <span class="pta-summary-main">Décisions intelligentes</span>
             <span class="pta-summary-meta">${missionPlan.viability || '—'}</span>
