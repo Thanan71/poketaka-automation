@@ -348,6 +348,14 @@ async function captureEncounter() {
   updatePanel();
 
   if (decision.action === 'capture' && context.captureButton) {
+    if (config.directHttpActions && context.form) {
+      return submitObservedForm(
+        context.form,
+        `Capture HTTP: ${context.species} — ${decision.reason}`,
+        { expectedKind: 'capture' }
+      );
+    }
+
     return clickElement(
       context.captureButton,
       `Capture: ${context.species} — ${decision.reason}`
