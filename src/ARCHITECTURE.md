@@ -10,6 +10,7 @@ La logique métier ne doit plus y être ajoutée.
 - `src/core/dom.js` — détection et clics DOM sûrs.
 - `src/account/snapshot.js` — état global observé du compte : niveau, roster, Pokédex, Ligue et progression d'expéditions.
 - `src/planner/goals.js` — objectifs globaux, dépendances de progression et bonus de priorité pour l'orchestrateur.
+- `src/features/pokemon/progression.js` — scan de la collection, renforcement sûr, évolution unique et protection des ressources.
 - `src/features/expeditions/team.js` — snapshot du roster, efficacité des types, viabilité et composition d'équipe.
 - `src/features/expeditions/capture.js` — détection des rencontres, contexte de capture, décisions et exécution.
 - `src/features/expeditions/cycle.js` — machine d'état expédition et résultats.
@@ -94,3 +95,22 @@ Les dépendances actuellement comprises incluent :
 - expédition explicitement exigée par une Arène ;
 - soins nécessaires avant un combat d'Arène ;
 - combat d'Arène quotidien déjà consommé.
+
+
+## Progression Pokémon
+
+Le module Pokémon fonctionne entre les activités prioritaires. Il n'investit jamais de ressources pendant une expédition active.
+
+Ordre de décision :
+
+1. attendre la fin d'une expédition en cours ;
+2. privilégier les Pokémon appartenant au plan d'équipe d'expédition ou d'Arène ;
+3. inspecter la fiche du Pokémon ;
+4. refuser toute action si le Pokémon participe à une activité ;
+5. effectuer une évolution si elle est unique, abordable et non ambiguë ;
+6. sinon effectuer au maximum un niveau de renforcement ;
+7. protéger la réserve minimale de Poussière Étoile ;
+8. protéger les Bonbons lorsqu'ils sont le seul prérequis manquant d'une évolution unique ;
+9. recalculer le plan après chaque action.
+
+Les évolutions à embranchement restent manuelles, car elles représentent un choix irréversible.
