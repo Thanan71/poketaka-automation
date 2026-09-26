@@ -26,6 +26,7 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
       lastAction: 'aucune',
       lastBotClickAt: 0,
       actionLog: [],
+      panelView: 'dashboard',
       httpTransport: {
         requests: 0,
         lastAt: 0,
