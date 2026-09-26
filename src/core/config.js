@@ -12,6 +12,8 @@ const STORAGE_KEY = 'poketaka-automation:config';
     autoIncubatorClaim: true,
     autoBreedingClaim: true,
     autoProgression: true,
+    autoGyms: true,
+    minGymHpPercent: 70,
     strategy: 'progression',
     minSuccessChance: 55,
     avoidLongLowValue: true,
