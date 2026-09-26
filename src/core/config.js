@@ -4,6 +4,8 @@ const STORAGE_KEY = 'poketaka-automation:config';
   const DEFAULT_CONFIG = {
     enabled: false,
     directHttpActions: true,
+    backgroundHttpMode: true,
+    backgroundRefreshSeconds: 30,
     intervalMs: 15000,
     jitterMs: 3500,
     autoClaimExpeditions: true,
