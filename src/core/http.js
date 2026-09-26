@@ -1,5 +1,178 @@
 let directRequestInFlight = false;
 
+const backgroundPageCache = new Map();
+let backgroundRequestInFlight = false;
+
+function backgroundHttpState() {
+  if (!state.backgroundHttp || typeof state.backgroundHttp !== 'object') {
+    state.backgroundHttp = {
+      gets: 0,
+      cacheHits: 0,
+      lastAt: 0,
+      lastUrl: null,
+      lastStatus: null,
+      lastError: null,
+      lastSweepAt: 0,
+    };
+  }
+  return state.backgroundHttp;
+}
+
+function backgroundPageKind(urlLike) {
+  let url;
+  try {
+    url = new URL(urlLike, location.href);
+  } catch {
+    return null;
+  }
+
+  if (url.origin !== location.origin) return null;
+
+  const path = url.pathname;
+  const routes = [
+    ['expeditions', /^\/expeditions\/?$/],
+    ['expedition_prepare', /^\/expeditions\/[^/]+\/prepare\/?$/],
+    ['expedition_result', /^\/expeditions\/results\/[^/]+\/?$/],
+    ['league', /^\/league\/?$/],
+    ['gym_prepare', /^\/gyms\/[^/]+\/prepare\/?$/],
+    ['collection', /^\/collection\/?$/],
+    ['pokemon_profile', /^\/collection\/[^/]+\/?$/],
+  ];
+
+  return routes.find(([, pattern]) => pattern.test(path))?.[0] || null;
+}
+
+function recordBackgroundHttp(patch = {}) {
+  state.backgroundHttp = {
+    ...backgroundHttpState(),
+    ...patch,
+  };
+  saveState(state);
+  updatePanel();
+}
+
+function attachBackgroundBase(doc, href) {
+  if (!doc?.head) return doc;
+  const existing = doc.querySelector('base[data-poketaka-background-base]');
+  if (existing) existing.remove();
+
+  const base = doc.createElement('base');
+  base.setAttribute('data-poketaka-background-base', '');
+  base.href = href;
+  doc.head.prepend(base);
+  return doc;
+}
+
+async function fetchObservedPage(
+  urlLike,
+  {
+    cacheMs = 8000,
+    force = false,
+  } = {}
+) {
+  if (!config.backgroundHttpMode) return null;
+
+  let url;
+  try {
+    url = new URL(urlLike, location.href);
+  } catch {
+    return null;
+  }
+
+  const kind = backgroundPageKind(url.href);
+  if (!kind) {
+    log('GET background refusé: route non autorisée', url.href);
+    return null;
+  }
+
+  const cacheKey = url.href;
+  const cached = backgroundPageCache.get(cacheKey);
+  if (!force && cached && now() - cached.fetchedAt <= cacheMs) {
+    recordBackgroundHttp({
+      cacheHits: Number(backgroundHttpState().cacheHits || 0) + 1,
+      lastAt: now(),
+      lastUrl: url.pathname,
+      lastStatus: 'cache',
+      lastError: null,
+    });
+    return cached;
+  }
+
+  if (backgroundRequestInFlight) return null;
+  backgroundRequestInFlight = true;
+
+  try {
+    const response = await fetch(url.href, {
+      method: 'GET',
+      headers: {
+        Accept: 'text/html,application/xhtml+xml',
+      },
+      credentials: 'same-origin',
+      redirect: 'follow',
+      cache: 'no-store',
+    });
+
+    const finalUrl = new URL(response.url || url.href, url.href);
+
+    if (finalUrl.origin !== location.origin) {
+      throw new Error('Redirection GET cross-origin refusée');
+    }
+
+    if (/^\/login\/?$/.test(finalUrl.pathname)) {
+      throw new Error('Session PokéTaka expirée');
+    }
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const contentType = response.headers.get('content-type') || '';
+    if (!contentType.includes('text/html')) {
+      throw new Error(`Réponse non HTML (${contentType || 'inconnue'})`);
+    }
+
+    const html = await response.text();
+    const doc = attachBackgroundBase(
+      new DOMParser().parseFromString(html, 'text/html'),
+      finalUrl.href
+    );
+
+    const result = {
+      kind,
+      url: finalUrl.href,
+      pathname: finalUrl.pathname,
+      status: response.status,
+      fetchedAt: now(),
+      html,
+      doc,
+    };
+
+    backgroundPageCache.set(cacheKey, result);
+
+    recordBackgroundHttp({
+      gets: Number(backgroundHttpState().gets || 0) + 1,
+      lastAt: now(),
+      lastUrl: finalUrl.pathname,
+      lastStatus: response.status,
+      lastError: null,
+    });
+
+    return result;
+  } catch (error) {
+    const message = error?.message || String(error);
+    recordBackgroundHttp({
+      lastAt: now(),
+      lastUrl: url.pathname,
+      lastStatus: 'error',
+      lastError: message,
+    });
+    log('GET background en échec', url.pathname, message);
+    return null;
+  } finally {
+    backgroundRequestInFlight = false;
+  }
+}
+
 function httpTransportState() {
   if (!state.httpTransport || typeof state.httpTransport !== 'object') {
     state.httpTransport = {
