@@ -90,6 +90,16 @@ async function claimExpedition() {
   }
 
   function resultEncounterRoot() {
+    const exact = document.querySelector(
+      '.mission-encounter, section.mission-encounter, [data-capture-form]'
+    );
+
+    if (exact) {
+      return exact.matches?.('[data-capture-form]')
+        ? exact.closest('.mission-encounter, section, article, div') || exact
+        : exact;
+    }
+
     const selectors = [
       '[data-encounter-pokemon]',
       '[data-capture-encounter]',
@@ -103,8 +113,11 @@ async function claimExpedition() {
 
     const button = findClickable([
       'capturer',
+      'lancer la ball',
+      'lancer ball',
       'lancer pokeball',
       'lancer une pokeball',
+      'throw ball',
       'throw pokeball',
       'fuir',
       'run away',
@@ -113,7 +126,56 @@ async function claimExpedition() {
     return button?.closest('article, section, .card, div') || null;
   }
 
-  function readBallReserve() {
+  function captureForm(root = resultEncounterRoot()) {
+    if (!root) return null;
+    return root.matches?.('form[data-capture-form]')
+      ? root
+      : root.querySelector(
+        'form[data-capture-form], form[action*="/expeditions/encounters/"][action$="/capture"], form[action*="/capture"]'
+      );
+  }
+
+  function captureSubmitButton(root = resultEncounterRoot()) {
+    const form = captureForm(root);
+    if (!form) return null;
+
+    const exact = form.querySelector(
+      'button.primary-button[type="submit"], button[type="submit"], input[type="submit"]'
+    );
+
+    if (exact && isVisible(exact) && !exact.disabled) return exact;
+
+    return findClickable([
+      'lancer la ball',
+      'lancer ball',
+      'capturer',
+      'capture',
+      'lancer pokeball',
+      'lancer une pokeball',
+      'throw ball',
+      'throw pokeball',
+    ], form, {
+      exclude: ['chance de capture', 'taux de capture'],
+    });
+  }
+
+  function readBallReserve(root = resultEncounterRoot()) {
+    const form = captureForm(root);
+
+    if (form) {
+      const checked = form.querySelector('input[name="ball_code"]:checked');
+      const checkedLabel = checked?.closest('label');
+      const checkedCount = checkedLabel?.querySelector('strong')?.textContent || '';
+      const checkedMatch = checkedCount.match(/\d+/);
+      if (checkedMatch) return Number(checkedMatch[0]);
+
+      const selectedCount = form.querySelector(
+        '[data-capture-select-value] strong, .capture-select__value strong'
+      )?.textContent || '';
+      const selectedMatch = selectedCount.match(/\d+/);
+      if (selectedMatch) return Number(selectedMatch[0]);
+    }
+
     const explicit = [...document.querySelectorAll(
       '[data-ball-count], [data-item-code*="ball" i], [data-item-name*="ball" i]'
     )];
@@ -137,24 +199,27 @@ async function claimExpedition() {
     return match ? Number(match[1]) : null;
   }
 
+  function parseCaptureChance(root) {
+    const element = root?.querySelector('[data-capture-chance], .capture-chance');
+    const text = normalizeText(element?.textContent || '');
+    const match = text.match(/(\d+(?:[.,]\d+)?)\s*%/);
+    return match ? parseNumber(match[1]) : null;
+  }
+
+  function parseCaptureAttempts(root) {
+    const text = normalizeText(
+      root?.querySelector('.mission-encounter__attempts')?.textContent || ''
+    );
+    const match = text.match(/(\d+)\s*(?:tentative|tentatives|attempt|attempts)/i);
+    return match ? Number(match[1]) : null;
+  }
+
   function captureContext() {
     const root = resultEncounterRoot();
     if (!root) return null;
 
     const text = normalizeText(root.innerText || root.textContent || '');
-    const captureButton = findClickable([
-      'capturer',
-      'capture',
-      'lancer pokeball',
-      'lancer une pokeball',
-      'throw pokeball',
-    ], root, { exclude: ['chance de capture', 'taux de capture'] }) ||
-      findClickable([
-        'capturer',
-        'lancer pokeball',
-        'lancer une pokeball',
-        'throw pokeball',
-      ]);
+    const captureButton = captureSubmitButton(root);
 
     const skipButton = findClickable([
       'fuir',
@@ -177,7 +242,8 @@ async function claimExpedition() {
       root.getAttribute('data-pokemon-name') ||
       root.getAttribute('data-species-name') ||
       root.querySelector('[data-pokemon-name]')?.getAttribute('data-pokemon-name') ||
-      root.querySelector('h1, h2, h3, strong')?.textContent?.trim() ||
+      root.querySelector('.mission-encounter__identity h3')?.textContent?.trim() ||
+      root.querySelector('h3')?.textContent?.trim() ||
       'Pokémon rencontré';
 
     let isNew =
@@ -189,10 +255,18 @@ async function claimExpedition() {
       parseOptionalBoolean(root.getAttribute('data-captured'));
 
     if (isNew == null && owned != null) isNew = !owned;
-    if (isNew == null && /nouvelle espece|premiere capture|jamais capture|non capture|new species|first capture/.test(text)) {
+
+    if (
+      isNew == null &&
+      /absente? du pokedex|absent from pokedex|nouvelle espece|premiere capture|jamais capture|non capture|new species|first capture/.test(text)
+    ) {
       isNew = true;
     }
-    if (isNew == null && /deja capture|deja possede|already caught|already owned/.test(text)) {
+
+    if (
+      isNew == null &&
+      /presente? dans le pokedex|deja capture|deja possede|already caught|already owned/.test(text)
+    ) {
       isNew = false;
     }
 
@@ -207,13 +281,16 @@ async function claimExpedition() {
 
     return {
       root,
+      form: captureForm(root),
       captureButton,
       skipButton,
       species: String(species).trim(),
       isNew,
       rarity,
       ivScore: parseNumber(ivRaw),
-      ballReserve: readBallReserve(),
+      ballReserve: readBallReserve(root),
+      captureChance: parseCaptureChance(root),
+      attemptsRemaining: parseCaptureAttempts(root),
       text,
     };
   }
@@ -232,7 +309,7 @@ async function claimExpedition() {
       context.ballReserve <= config.minBallReserve
     ) {
       return {
-        action: 'skip',
+        action: context.skipButton ? 'skip' : 'manual',
         reason: `Réserve de Balls protégée (${context.ballReserve} ≤ ${config.minBallReserve})`,
       };
     }
@@ -242,7 +319,12 @@ async function claimExpedition() {
     }
 
     if (config.captureNewSpecies && context.isNew === true) {
-      return { action: 'capture', reason: 'Nouvelle espèce' };
+      return {
+        action: 'capture',
+        reason: context.captureChance != null
+          ? `Nouvelle espèce · ${context.captureChance}%`
+          : 'Nouvelle espèce',
+      };
     }
 
     if (
@@ -264,7 +346,12 @@ async function claimExpedition() {
     }
 
     if (config.captureUnknownEncounters && context.isNew == null) {
-      return { action: 'capture', reason: 'Rencontre inconnue autorisée' };
+      return {
+        action: 'capture',
+        reason: context.captureChance != null
+          ? `Rencontre inconnue autorisée · ${context.captureChance}%`
+          : 'Rencontre inconnue autorisée',
+      };
     }
 
     return {
@@ -280,7 +367,7 @@ async function claimExpedition() {
     return Boolean(context?.captureButton || context?.skipButton);
   }
 
-  function recordExpeditionOutcome() {
+function recordExpeditionOutcome() {
     if (!isExpeditionResultPage()) return;
     if (state.lastRecordedResultUrl === location.pathname) return;
 
