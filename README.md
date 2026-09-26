@@ -174,3 +174,22 @@ Une réserve minimale de Balls est conservée lorsqu'un compteur exploitable est
 À chaque cycle, le script construit un plan priorisé. Les confirmations et résultats d'expédition passent avant la préparation, les soins et récupérations, puis viennent les actions de progression et la navigation vers un module dont un timer ou indicateur signale qu'une action est nécessaire.
 
 Le dashboard affiche la dernière décision de l'orchestrateur, l'équipe intelligente utilisée et la dernière décision de capture.
+
+## Architecture modulaire et mises à jour
+
+Le fichier racine `poketaka.user.js` est désormais un loader minimal. La logique du bot se trouve dans `src/` et est répartie par responsabilité.
+
+À chaque push sur `main`, GitHub Actions :
+
+1. assemble les modules dans `dist/runtime.js` ;
+2. génère un loader Tampermonkey avec une nouvelle version `YYYY.M.D.<run>` ;
+3. vérifie la syntaxe ;
+4. publie `runtime.js` et `poketaka.user.js` via GitHub Pages.
+
+Une modification de n'importe quel fichier du repository entraîne donc une nouvelle version Tampermonkey publiée automatiquement, sans recopier la logique dans le loader.
+
+URL de mise à jour configurée dans le loader :
+
+`https://thanan71.github.io/poketaka-automation/poketaka.user.js`
+
+Le détail des responsabilités des fichiers est dans `src/ARCHITECTURE.md`.
