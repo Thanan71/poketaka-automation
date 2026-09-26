@@ -358,19 +358,41 @@
       return clickElement(launchButton, 'Lancement de l’expédition');
     }
 
+    const checkedTeam = document.querySelector(
+      'input[type="radio"][name*="team" i]:checked, input[type="radio"][name*="equipe" i]:checked'
+    );
     const teamRadio = [...document.querySelectorAll(
       'input[type="radio"][name*="team" i], input[type="radio"][name*="equipe" i]'
-    )].find(input => !input.disabled && isVisible(input));
+    )].find(input => !input.disabled);
 
-    if (teamRadio && !document.querySelector(
-      'input[type="radio"][name*="team" i]:checked, input[type="radio"][name*="equipe" i]:checked'
-    )) {
-      teamRadio.click();
+    if (teamRadio && !checkedTeam) {
+      const label = teamRadio.id
+        ? document.querySelector(`label[for="${CSS.escape(teamRadio.id)}"]`)
+        : null;
+      (label || teamRadio).click();
+      teamRadio.dispatchEvent(new Event('change', { bubbles: true }));
       state.lastAction = 'Équipe disponible sélectionnée';
       state.lastActionAt = now();
       saveState(state);
       updatePanel();
       return true;
+    }
+
+    const teamSelect = [...document.querySelectorAll(
+      'select[name*="team" i], select[name*="equipe" i]'
+    )].find(select => !select.disabled);
+
+    if (teamSelect && !teamSelect.value) {
+      const option = [...teamSelect.options].find(item => !item.disabled && item.value);
+      if (option) {
+        teamSelect.value = option.value;
+        teamSelect.dispatchEvent(new Event('change', { bubbles: true }));
+        state.lastAction = 'Équipe disponible sélectionnée';
+        state.lastActionAt = now();
+        saveState(state);
+        updatePanel();
+        return true;
+      }
     }
 
     const teamButton = findClickable([
@@ -1762,6 +1784,22 @@
     return `${seconds}s`;
   }
 
+  function expeditionPhaseLabel(phase) {
+    const labels = {
+      unknown: 'À synchroniser',
+      ready_to_start: 'Prête à lancer',
+      preparing: 'Préparation',
+      starting: 'Lancement',
+      running: 'En cours',
+      due: 'Résultat prêt',
+      opening_result: 'Ouverture résultat',
+      result: 'Résultats',
+      awaiting_capture: 'Capture manuelle',
+      claiming: 'Récupération',
+    };
+    return labels[phase] || phase || 'Inconnu';
+  }
+
   function nextDueModule() {
     return MODULES
       .filter(module => moduleEnabled(module.id))
@@ -1926,11 +1964,15 @@
             <div class="pta-label">Dernière action</div>
             <div class="pta-value" title="${escapeHtml(state.lastAction)}">${escapeHtml(state.lastAction || 'Aucune')}</div>
           </div>
-          <div class="pta-card pta-card-wide">
-            <div class="pta-label">Cible d’expédition</div>
+          <div class="pta-card">
+            <div class="pta-label">Cycle expédition</div>
+            <div class="pta-value">${escapeHtml(expeditionPhaseLabel(expeditionCycle().phase))}</div>
+          </div>
+          <div class="pta-card">
+            <div class="pta-label">Cible</div>
             <div class="pta-value" title="${escapeHtml(state.selectedExpedition || '')}">
-              ${escapeHtml(state.selectedExpedition || 'Aucune cible')}
-              ${state.selectedExpeditionScore != null ? `<small> · score ${state.selectedExpeditionScore}</small>` : ''}
+              ${escapeHtml(state.selectedExpedition || 'Aucune')}
+              ${state.selectedExpeditionScore != null ? `<small> · ${state.selectedExpeditionScore}</small>` : ''}
             </div>
           </div>
         </div>
