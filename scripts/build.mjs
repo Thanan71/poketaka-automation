@@ -8,6 +8,7 @@ const MODULES = [
   'src/core/config.js',
   'src/core/state.js',
   'src/core/dom.js',
+  'src/core/http.js',
   'src/features/expeditions/team.js',
   'src/features/league/gyms.js',
   'src/account/snapshot.js',
