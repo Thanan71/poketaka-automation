@@ -30,6 +30,20 @@ Il ne cherche pas à :
 - captures et replantation disponibles mais désactivées par défaut ;
 - garde-fous empêchant les clics sur achat/vente/libération/échange.
 
+## Interface
+
+Le panneau intégré fonctionne désormais comme un petit tableau de bord :
+
+- statut actif / pause immédiatement visible ;
+- page actuellement détectée ;
+- prochaine échéance connue avec compte à rebours ;
+- dernière action et nombre total d'actions ;
+- meilleure cible d'expédition et score ;
+- modules surveillés avec leur état ;
+- réglages repliables ;
+- mode compact pour laisser davantage de place au jeu ;
+- bouton de cycle manuel et accès au classement des expéditions.
+
 ## Installation
 
 1. Installer Tampermonkey.
