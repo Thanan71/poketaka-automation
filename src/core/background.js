@@ -432,14 +432,18 @@ async function verifyBackgroundExpeditionClaim(resultUrl) {
   });
   if (!page) return false;
 
-  const recovered = expeditionRewardsRecovered(page.doc);
+  const redirectedToIndex = /^\/expeditions\/?$/.test(page.pathname);
+  const recovered = redirectedToIndex || expeditionRewardsRecovered(page.doc);
 
   if (recovered) {
     appendActionLog(
       'success',
       'expedition',
       'Récompenses d’expédition confirmées',
-      { resultUrl: page.pathname }
+      {
+        resultUrl: page.pathname,
+        verification: redirectedToIndex ? 'redirected_to_index' : 'result_marked_recovered',
+      }
     );
     return true;
   }
