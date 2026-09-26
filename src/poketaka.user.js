@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PokéTaka Automation
 // @namespace    https://github.com/Thanan71/poketaka-automation
-// @version      0.4.3
+// @version      0.7.0
 // @description  Assistant d'automatisation DOM pour PokéTaka : expéditions, récompenses, soins, serre et progression.
 // @author       Thanan71
 // @match        https://poketaka.fr/*
@@ -16,7 +16,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.4.3';
+  const VERSION = '0.7.0';
   const STORAGE_KEY = 'poketaka-automation:config';
   const STATE_KEY = 'poketaka-automation:state';
 
@@ -34,7 +34,15 @@
     strategy: 'progression',
     minSuccessChance: 55,
     avoidLongLowValue: true,
+    smartTeam: true,
+    minTeamHpPercent: 45,
     autoCapture: false,
+    smartCapture: true,
+    captureNewSpecies: true,
+    captureRare: true,
+    captureUnknownEncounters: false,
+    minCaptureIvScore: 80,
+    minBallReserve: 3,
     autoPlant: false,
     panelCollapsed: false,
     debug: true,
@@ -57,6 +65,27 @@
     'echanger', 'trade',
     'abandonner', 'abandon',
   ];
+
+  const TYPE_CHART = {
+    normal: { roche: 0.5, rock: 0.5, acier: 0.5, steel: 0.5, spectre: 0, ghost: 0 },
+    feu: { plante: 2, grass: 2, glace: 2, ice: 2, insecte: 2, bug: 2, acier: 2, steel: 2, feu: 0.5, eau: 0.5, water: 0.5, roche: 0.5, rock: 0.5, dragon: 0.5 },
+    eau: { feu: 2, sol: 2, ground: 2, roche: 2, rock: 2, eau: 0.5, plante: 0.5, grass: 0.5, dragon: 0.5 },
+    electrik: { eau: 2, water: 2, vol: 2, flying: 2, electrik: 0.5, plante: 0.5, grass: 0.5, dragon: 0.5, sol: 0, ground: 0 },
+    plante: { eau: 2, water: 2, sol: 2, ground: 2, roche: 2, rock: 2, feu: 0.5, plante: 0.5, poison: 0.5, vol: 0.5, flying: 0.5, insecte: 0.5, bug: 0.5, dragon: 0.5, acier: 0.5, steel: 0.5 },
+    glace: { plante: 2, grass: 2, sol: 2, ground: 2, vol: 2, flying: 2, dragon: 2, feu: 0.5, eau: 0.5, water: 0.5, glace: 0.5, acier: 0.5, steel: 0.5 },
+    combat: { normal: 2, glace: 2, roche: 2, rock: 2, tenebres: 2, dark: 2, acier: 2, steel: 2, poison: 0.5, vol: 0.5, flying: 0.5, psy: 0.5, psychic: 0.5, insecte: 0.5, bug: 0.5, fee: 0.5, fairy: 0.5, spectre: 0, ghost: 0 },
+    poison: { plante: 2, grass: 2, fee: 2, fairy: 2, poison: 0.5, sol: 0.5, ground: 0.5, roche: 0.5, rock: 0.5, spectre: 0.5, ghost: 0.5, acier: 0, steel: 0 },
+    sol: { feu: 2, electrik: 2, poison: 2, roche: 2, rock: 2, acier: 2, steel: 2, plante: 0.5, grass: 0.5, insecte: 0.5, bug: 0.5, vol: 0, flying: 0 },
+    vol: { plante: 2, grass: 2, combat: 2, insecte: 2, bug: 2, electrik: 0.5, roche: 0.5, rock: 0.5, acier: 0.5, steel: 0.5 },
+    psy: { combat: 2, poison: 2, psy: 0.5, psychic: 0.5, acier: 0.5, steel: 0.5, tenebres: 0, dark: 0 },
+    insecte: { plante: 2, grass: 2, psy: 2, psychic: 2, tenebres: 2, dark: 2, feu: 0.5, combat: 0.5, poison: 0.5, vol: 0.5, flying: 0.5, spectre: 0.5, ghost: 0.5, acier: 0.5, steel: 0.5, fee: 0.5, fairy: 0.5 },
+    roche: { feu: 2, glace: 2, vol: 2, flying: 2, insecte: 2, bug: 2, combat: 0.5, sol: 0.5, ground: 0.5, acier: 0.5, steel: 0.5 },
+    spectre: { psy: 2, psychic: 2, spectre: 2, ghost: 2, tenebres: 0.5, dark: 0.5, normal: 0 },
+    dragon: { dragon: 2, acier: 0.5, steel: 0.5, fee: 0, fairy: 0 },
+    tenebres: { psy: 2, psychic: 2, spectre: 2, ghost: 2, combat: 0.5, tenebres: 0.5, dark: 0.5, fee: 0.5, fairy: 0.5 },
+    acier: { glace: 2, roche: 2, rock: 2, fee: 2, fairy: 2, feu: 0.5, eau: 0.5, water: 0.5, electrik: 0.5, acier: 0.5, steel: 0.5 },
+    fee: { combat: 2, dragon: 2, tenebres: 2, dark: 2, feu: 0.5, poison: 0.5, acier: 0.5, steel: 0.5 },
+  };
 
   const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
   const now = () => Date.now();
@@ -97,6 +126,23 @@
         resultUrl: null,
         dueAt: null,
         lastTransitionAt: 0,
+      },
+      smartTeam: {
+        lastSelection: [],
+        lastMissionTypes: [],
+        lastRecommendedLevel: null,
+      },
+      captureDecision: {
+        action: 'none',
+        reason: null,
+        species: null,
+      },
+      expeditionStats: {},
+      lastRecordedResultUrl: null,
+      orchestrator: {
+        lastDecision: null,
+        lastReason: null,
+        lastPriority: 0,
       },
       ...(GM_getValue(STATE_KEY, {}) || {}),
     };
@@ -310,19 +356,241 @@
       }) || null;
   }
 
-  function resultPageHasPendingCapture() {
-    return Boolean(
+  function parseOptionalBoolean(value) {
+    if (value == null || value === '') return null;
+    const normalized = normalizeText(value);
+    if (['1', 'true', 'yes', 'oui', 'new', 'owned', 'captured'].includes(normalized)) return true;
+    if (['0', 'false', 'no', 'non', 'unknown'].includes(normalized)) return false;
+    return null;
+  }
+
+  function resultEncounterRoot() {
+    const selectors = [
+      '[data-encounter-pokemon]',
+      '[data-capture-encounter]',
+      '[data-pokemon-encounter]',
+      '.encounter-card',
+      '[class*="encounter"]',
+    ];
+
+    const direct = document.querySelector(selectors.join(','));
+    if (direct) return direct;
+
+    const button = findClickable([
+      'capturer',
+      'lancer pokeball',
+      'lancer une pokeball',
+      'throw pokeball',
+      'fuir',
+      'run away',
+    ]);
+
+    return button?.closest('article, section, .card, div') || null;
+  }
+
+  function readBallReserve() {
+    const explicit = [...document.querySelectorAll(
+      '[data-ball-count], [data-item-code*="ball" i], [data-item-name*="ball" i]'
+    )];
+
+    for (const element of explicit) {
+      const values = [
+        element.getAttribute('data-ball-count'),
+        element.getAttribute('data-quantity'),
+        element.getAttribute('data-count'),
+        element.textContent,
+      ];
+
+      for (const value of values) {
+        const match = String(value || '').match(/\d+/);
+        if (match) return Number(match[0]);
+      }
+    }
+
+    const pageText = normalizeText(document.body?.innerText || '');
+    const match = pageText.match(/(?:poke ?ball|super ?ball|hyper ?ball|ball)[^\d]{0,15}(\d+)/i);
+    return match ? Number(match[1]) : null;
+  }
+
+  function captureContext() {
+    const root = resultEncounterRoot();
+    if (!root) return null;
+
+    const text = normalizeText(root.innerText || root.textContent || '');
+    const captureButton = findClickable([
+      'capturer',
+      'capture',
+      'lancer pokeball',
+      'lancer une pokeball',
+      'throw pokeball',
+    ], root, { exclude: ['chance de capture', 'taux de capture'] }) ||
       findClickable([
         'capturer',
         'lancer pokeball',
         'lancer une pokeball',
         'throw pokeball',
+      ]);
+
+    const skipButton = findClickable([
+      'fuir',
+      'ignorer',
+      'passer',
+      'continuer sans capturer',
+      'laisser partir',
+      'run away',
+      'skip',
+      'leave',
+    ], root) ||
+      findClickable([
         'fuir',
+        'continuer sans capturer',
+        'laisser partir',
         'run away',
-      ], document, {
-        exclude: ['historique', 'history', 'chance de capture'],
-      })
+      ]);
+
+    const species =
+      root.getAttribute('data-pokemon-name') ||
+      root.getAttribute('data-species-name') ||
+      root.querySelector('[data-pokemon-name]')?.getAttribute('data-pokemon-name') ||
+      root.querySelector('h1, h2, h3, strong')?.textContent?.trim() ||
+      'Pokémon rencontré';
+
+    let isNew =
+      parseOptionalBoolean(root.getAttribute('data-new-species')) ??
+      parseOptionalBoolean(root.getAttribute('data-new'));
+
+    const owned =
+      parseOptionalBoolean(root.getAttribute('data-owned')) ??
+      parseOptionalBoolean(root.getAttribute('data-captured'));
+
+    if (isNew == null && owned != null) isNew = !owned;
+    if (isNew == null && /nouvelle espece|premiere capture|jamais capture|non capture|new species|first capture/.test(text)) {
+      isNew = true;
+    }
+    if (isNew == null && /deja capture|deja possede|already caught|already owned/.test(text)) {
+      isNew = false;
+    }
+
+    const rarity =
+      normalizeText(root.getAttribute('data-rarity') || '') ||
+      (text.match(/\b(commun|peu commun|rare|epique|legendaire|mythique|common|uncommon|epic|legendary|mythic)\b/)?.[1] || '');
+
+    const ivRaw =
+      root.getAttribute('data-iv-total') ||
+      root.getAttribute('data-iv-score') ||
+      text.match(/(?:iv|ivs)[^\d]{0,12}(\d+(?:[.,]\d+)?)/i)?.[1];
+
+    return {
+      root,
+      captureButton,
+      skipButton,
+      species: String(species).trim(),
+      isNew,
+      rarity,
+      ivScore: parseNumber(ivRaw),
+      ballReserve: readBallReserve(),
+      text,
+    };
+  }
+
+  function decideCapture(context) {
+    if (!context?.captureButton) {
+      return { action: 'none', reason: 'Aucun bouton de capture visible' };
+    }
+
+    if (!config.autoCapture) {
+      return { action: 'manual', reason: 'Captures automatiques désactivées' };
+    }
+
+    if (
+      context.ballReserve != null &&
+      context.ballReserve <= config.minBallReserve
+    ) {
+      return {
+        action: 'skip',
+        reason: `Réserve de Balls protégée (${context.ballReserve} ≤ ${config.minBallReserve})`,
+      };
+    }
+
+    if (!config.smartCapture) {
+      return { action: 'capture', reason: 'Mode capture simple' };
+    }
+
+    if (config.captureNewSpecies && context.isNew === true) {
+      return { action: 'capture', reason: 'Nouvelle espèce' };
+    }
+
+    if (
+      config.captureRare &&
+      /rare|epique|legendaire|mythique|epic|legendary|mythic/.test(context.rarity)
+    ) {
+      return { action: 'capture', reason: `Rareté: ${context.rarity}` };
+    }
+
+    if (
+      context.ivScore != null &&
+      context.ivScore >= config.minCaptureIvScore &&
+      context.ivScore <= 100
+    ) {
+      return {
+        action: 'capture',
+        reason: `IV ${context.ivScore} ≥ ${config.minCaptureIvScore}`,
+      };
+    }
+
+    if (config.captureUnknownEncounters && context.isNew == null) {
+      return { action: 'capture', reason: 'Rencontre inconnue autorisée' };
+    }
+
+    return {
+      action: context.skipButton ? 'skip' : 'manual',
+      reason: context.isNew === false
+        ? 'Doublon sans critère prioritaire'
+        : 'Informations insuffisantes pour consommer une Ball',
+    };
+  }
+
+  function resultPageHasPendingCapture() {
+    const context = captureContext();
+    return Boolean(context?.captureButton || context?.skipButton);
+  }
+
+  function recordExpeditionOutcome() {
+    if (!isExpeditionResultPage()) return;
+    if (state.lastRecordedResultUrl === location.pathname) return;
+
+    const text = normalizeText(document.body?.innerText || '');
+    const failure = /echec|echouee|echoue|defaite|failed|failure|lost/.test(text);
+    const success = /reussite|reussie|victoire|success|completed|terminee avec succes/.test(text);
+
+    if (!failure && !success) return;
+
+    const title = normalizeText(
+      document.querySelector('.page-header h1, main h1, main h2')?.textContent ||
+      expeditionCycle().title ||
+      'expedition'
     );
+
+    const previous = state.expeditionStats?.[title] || {
+      attempts: 0,
+      successes: 0,
+      failures: 0,
+      failureStreak: 0,
+    };
+
+    state.expeditionStats = {
+      ...(state.expeditionStats || {}),
+      [title]: {
+        attempts: previous.attempts + 1,
+        successes: previous.successes + (success && !failure ? 1 : 0),
+        failures: previous.failures + (failure ? 1 : 0),
+        failureStreak: failure ? previous.failureStreak + 1 : 0,
+        lastOutcome: failure ? 'failure' : 'success',
+        lastOutcomeAt: now(),
+      },
+    };
+    state.lastRecordedResultUrl = location.pathname;
+    saveState(state);
   }
 
   function resultPageLooksResolved() {
@@ -343,32 +611,193 @@
 
     const min = Number(form.getAttribute('data-team-min') || 1);
     const max = Number(form.getAttribute('data-team-max') || min);
-    const selected = [...form.querySelectorAll('[data-team-select]')]
-      .filter(select => select.value)
-      .length;
+    const selectedIds = [...form.querySelectorAll('[data-team-select]')]
+      .map(select => select.value)
+      .filter(Boolean);
 
-    return { form, min, max, selected };
+    return { form, min, max, selected: selectedIds.length, selectedIds };
   }
 
-  function selectFirstAvailablePokemon(requirement) {
-    if (!requirement?.form) return false;
+  function canonicalType(value) {
+    const type = normalizeText(value);
+    const aliases = {
+      fire: 'feu', water: 'eau', grass: 'plante', electric: 'electrik',
+      ice: 'glace', fighting: 'combat', ground: 'sol', flying: 'vol',
+      psychic: 'psy', bug: 'insecte', rock: 'roche', ghost: 'spectre',
+      dark: 'tenebres', steel: 'acier', fairy: 'fee',
+    };
+    return aliases[type] || type;
+  }
 
-    const selects = [...requirement.form.querySelectorAll('select[data-team-select]')];
-    for (const select of selects) {
-      if (select.value) continue;
-      const option = [...select.options].find(item => !item.disabled && item.value);
-      if (!option) continue;
+  function typeMultiplier(attacker, defender) {
+    const atk = canonicalType(attacker);
+    const def = canonicalType(defender);
+    return TYPE_CHART[atk]?.[def] ?? 1;
+  }
 
-      select.value = option.value;
+  function expeditionPreparationContext(requirement) {
+    const root = requirement?.form?.closest('main') || document;
+    const facts = {};
+
+    root.querySelectorAll('.expedition-prep-facts > div').forEach(row => {
+      const key = normalizeText(row.querySelector('dt')?.textContent || '');
+      const value = normalizeText(row.querySelector('dd')?.textContent || '');
+      if (key) facts[key] = value;
+    });
+
+    const typeText = facts['types principaux'] || facts.types || '';
+    const missionTypes = typeText
+      .split(/[,/]/)
+      .map(canonicalType)
+      .filter(Boolean);
+
+    const recommendedLevel = parseNumber(
+      (facts['niveau conseille'] || facts['niveau recommandé'] || '').match(/\d+(?:[.,]\d+)?/)?.[0]
+    );
+
+    return {
+      title: normalizeText(root.querySelector('.page-header h1, h1')?.textContent || ''),
+      missionTypes,
+      recommendedLevel,
+      durationMinutes: parseDurationMinutes(facts.duree || facts.duration || ''),
+    };
+  }
+
+  function pokemonFromCard(card) {
+    const hp = parseNumber(card.getAttribute('data-pokemon-hp')) || 0;
+    const hpMax = parseNumber(card.getAttribute('data-pokemon-hp-max')) || hp || 1;
+    return {
+      card,
+      id: card.getAttribute('data-pokemon-id') || '',
+      name: card.getAttribute('data-pokemon-name') || normalizeText(card.textContent || ''),
+      level: parseNumber(card.getAttribute('data-pokemon-level')) || 0,
+      hp,
+      hpMax,
+      hpPercent: hpMax > 0 ? (hp / hpMax) * 100 : 0,
+      types: (card.getAttribute('data-pokemon-types') || '')
+        .split(/[\s,;/]+/)
+        .map(canonicalType)
+        .filter(Boolean),
+      favorite: card.getAttribute('data-pokemon-favorite') === '1',
+      heldItem: Boolean(card.getAttribute('data-pokemon-held-item')),
+    };
+  }
+
+  function pokemonMatchupScore(pokemon, context) {
+    if (!context.missionTypes.length || !pokemon.types.length) return 0;
+
+    const multipliers = context.missionTypes.map(defender =>
+      Math.max(...pokemon.types.map(attacker => typeMultiplier(attacker, defender)))
+    );
+
+    return multipliers.reduce((sum, value) => {
+      if (value >= 2) return sum + 45;
+      if (value > 1) return sum + 20;
+      if (value === 0) return sum - 80;
+      if (value < 1) return sum - 25;
+      return sum;
+    }, 0);
+  }
+
+  function rankAvailablePokemon(requirement) {
+    if (!requirement?.form) return [];
+
+    const context = expeditionPreparationContext(requirement);
+    const selected = new Set(requirement.selectedIds || []);
+
+    const ranking = [...requirement.form.querySelectorAll('[data-team-pokemon][data-pokemon-id]')]
+      .map(pokemonFromCard)
+      .filter(pokemon => pokemon.id && !selected.has(pokemon.id))
+      .map(pokemon => {
+        let score = pokemon.level * 12;
+        const reasons = [`niveau ${pokemon.level}`];
+
+        score += pokemon.hpPercent * 0.55;
+        reasons.push(`PV ${Math.round(pokemon.hpPercent)}%`);
+
+        if (pokemon.hpPercent < config.minTeamHpPercent) {
+          score -= 1000;
+          reasons.push(`PV sous ${config.minTeamHpPercent}%`);
+        }
+
+        if (context.recommendedLevel != null) {
+          const delta = pokemon.level - context.recommendedLevel;
+          if (delta >= 0) {
+            const bonus = Math.min(80, 25 + delta * 8);
+            score += bonus;
+            reasons.push(`+${bonus} niveau adapté`);
+          } else {
+            const penalty = Math.min(500, Math.abs(delta) * 65);
+            score -= penalty;
+            reasons.push(`-${penalty} sous le niveau conseillé`);
+          }
+        }
+
+        const matchup = pokemonMatchupScore(pokemon, context);
+        score += matchup;
+        if (matchup) reasons.push(`${matchup > 0 ? '+' : ''}${matchup} types`);
+
+        if (pokemon.favorite) score += 5;
+        if (pokemon.heldItem) score += 8;
+
+        return {
+          ...pokemon,
+          score: Math.round(score),
+          reasons,
+          missionTypes: context.missionTypes,
+          recommendedLevel: context.recommendedLevel,
+        };
+      })
+      .sort((a, b) => b.score - a.score);
+
+    if (config.debug && ranking.length) {
+      console.table(ranking.map(item => ({
+        pokemon: item.name,
+        score: item.score,
+        niveau: item.level,
+        pv: Math.round(item.hpPercent) + '%',
+        types: item.types.join(', '),
+        mission: item.missionTypes.join(', '),
+      })));
+    }
+
+    return ranking;
+  }
+
+  async function selectSmartPokemon(requirement) {
+    const ranking = rankAvailablePokemon(requirement);
+    const best = ranking.find(item => item.hpPercent >= config.minTeamHpPercent);
+    if (!best) return false;
+
+    state.smartTeam = {
+      lastSelection: [...(state.smartTeam?.lastSelection || []), best.name],
+      lastMissionTypes: best.missionTypes,
+      lastRecommendedLevel: best.recommendedLevel,
+    };
+    saveState(state);
+
+    const select = [...requirement.form.querySelectorAll('select[data-team-select]')]
+      .find(input => !input.value && [...input.options].some(option => option.value === best.id));
+
+    if (select) {
+      select.value = best.id;
       select.dispatchEvent(new Event('input', { bubbles: true }));
       select.dispatchEvent(new Event('change', { bubbles: true }));
+      state.lastAction = `Équipe intelligente: ${best.name} (score ${best.score})`;
+      state.lastActionAt = now();
+      state.lastBotClickAt = now();
+      state.actions += 1;
+      saveState(state);
+      updatePanel();
+      log('Équipe intelligente via select:', best);
       return true;
     }
 
-    const card = requirement.form.querySelector('[data-team-pokemon][data-pokemon-id]');
-    if (card && isVisible(card)) {
-      card.click();
-      return true;
+    if (isVisible(best.card)) {
+      return clickElement(
+        best.card,
+        `Équipe intelligente: ${best.name} (score ${best.score})`
+      );
     }
 
     return false;
@@ -378,10 +807,17 @@
     if (!config.autoStartExpeditions) return false;
 
     const requirement = expeditionTeamRequirement();
+    if (!requirement) return false;
 
-    // La page PokéTaka expose "Dernière équipe utilisée". C'est le chemin
-    // privilégié car il réapplique exactement une composition déjà valide.
-    if (requirement && requirement.selected < requirement.min) {
+    if (requirement.selected < requirement.min) {
+      if (config.smartTeam) {
+        const selected = await selectSmartPokemon(requirement);
+        if (selected) {
+          setExpeditionPhase('preparing');
+          return true;
+        }
+      }
+
       const lastTeamButton = document.querySelector(
         'button[data-last-expedition-team][data-last-team-ids]'
       );
@@ -389,14 +825,6 @@
       if (lastTeamButton && isVisible(lastTeamButton)) {
         setExpeditionPhase('preparing');
         return clickElement(lastTeamButton, 'Application de la dernière équipe');
-      }
-
-      if (selectFirstAvailablePokemon(requirement)) {
-        state.lastAction = 'Pokémon disponible ajouté à l’expédition';
-        state.lastActionAt = now();
-        saveState(state);
-        updatePanel();
-        return true;
       }
 
       state.lastAction = `Préparation bloquée — équipe ${requirement.selected}/${requirement.min}`;
@@ -416,7 +844,7 @@
       'demarrer',
       'start expedition',
       'start',
-    ], document, {
+    ], requirement.form, {
       exclude: ['annuler', 'cancel', 'acheter', 'buy'],
     });
 
@@ -489,22 +917,17 @@
     }
 
     if (isExpeditionResultPage()) {
+      recordExpeditionOutcome();
+
       if (!['claiming', 'awaiting_capture'].includes(cycleState.phase)) {
         setExpeditionPhase('result');
       }
 
       if (resultPageHasPendingCapture()) {
-        if (config.autoCapture) {
-          const captured = await captureEncounter();
-          if (captured) {
-            setExpeditionPhase('claiming');
-            return true;
-          }
-        } else {
-          setExpeditionPhase('awaiting_capture');
-          state.lastAction = 'Capture en attente — intervention manuelle';
-          saveState(state);
-          updatePanel();
+        const handledCapture = await captureEncounter();
+        if (handledCapture) return true;
+
+        if (expeditionCycle().phase === 'awaiting_capture') {
           return false;
         }
       }
@@ -605,14 +1028,40 @@
   }
 
   async function captureEncounter() {
-    if (!config.autoCapture) return false;
-    const button = findClickable([
-      'capturer',
-      'capture',
-      'lancer pokeball',
-      'throw pokeball',
-    ], document, { exclude: ['fuir', 'run', 'berry', 'baie'] });
-    return button ? clickElement(button, 'Tentative de capture') : false;
+    const context = captureContext();
+    if (!context) return false;
+
+    const decision = decideCapture(context);
+    state.captureDecision = {
+      action: decision.action,
+      reason: decision.reason,
+      species: context.species,
+    };
+    saveState(state);
+    updatePanel();
+
+    if (decision.action === 'capture' && context.captureButton) {
+      return clickElement(
+        context.captureButton,
+        `Capture: ${context.species} — ${decision.reason}`
+      );
+    }
+
+    if (decision.action === 'skip' && context.skipButton) {
+      return clickElement(
+        context.skipButton,
+        `Capture ignorée: ${context.species} — ${decision.reason}`
+      );
+    }
+
+    if (decision.action === 'manual') {
+      setExpeditionPhase('awaiting_capture');
+      state.lastAction = `Capture manuelle: ${context.species} — ${decision.reason}`;
+      saveState(state);
+      updatePanel();
+    }
+
+    return false;
   }
 
   function expeditionPrepareLink(card) {
@@ -800,14 +1249,17 @@
       details?.textContent || '',
     ].join(' '));
 
+    const title = expeditionTitle(card, index);
     const chance = parseChance(text);
     const durationMinutes = parseDurationMinutes(text);
     const requiredLevel = parseRequiredLevel(text);
     const rewardScore = parseRewardValue(text);
     const costs = parseResourceCost(text);
     const progressionRank = zoneRank(text, index);
-    const newProgression = isNewProgression(text);
-    const completed = isPreviouslyCompleted(text);
+    const completed = pageContext.historyTitles?.has(title) || isPreviouslyCompleted(text);
+    const newProgression = !completed || isNewProgression(text);
+    const stats = state.expeditionStats?.[title] || {};
+    const failureStreak = Number(stats.failureStreak || 0);
     const startButton = expeditionPrepareLink(card);
 
     let score = progressionRank * 6;
@@ -823,22 +1275,18 @@
       reasons.push('-45 déjà terminée');
     }
 
+    if (failureStreak > 0) {
+      const failurePenalty = failureStreak >= 2
+        ? 650 + (failureStreak - 2) * 180
+        : 180;
+      score -= failurePenalty;
+      reasons.push(`-${failurePenalty} échecs consécutifs (${failureStreak})`);
+    }
+
     if (chance != null) {
-      score += chance * 1.6;
-      reasons.push(`+${Math.round(chance * 1.6)} chance ${chance}%`);
-
-      if (chance < config.minSuccessChance) {
-        score -= (config.minSuccessChance - chance) * 7;
-        reasons.push(`risque élevé (<${config.minSuccessChance}%)`);
-      }
-
-      if (chance < 30) {
-        score -= 500;
-        reasons.push('-500 chance critique');
-      }
-    } else {
-      score += 60;
-      reasons.push('+60 chance inconnue');
+      const encounterBonus = chance * 0.45;
+      score += encounterBonus;
+      reasons.push(`+${Math.round(encounterBonus)} potentiel rencontre ${chance}%`);
     }
 
     if (requiredLevel != null && pageContext.teamLevel != null) {
@@ -884,7 +1332,7 @@
       card,
       button: startButton,
       index,
-      title: expeditionTitle(card, index),
+      title,
       chance,
       durationMinutes,
       requiredLevel,
@@ -893,6 +1341,7 @@
       progressionRank,
       newProgression,
       completed,
+      failureStreak,
       energyCost: costs.energy,
       energyAvailable: pageContext.resources.energy,
       score: Math.round(score),
@@ -903,9 +1352,16 @@
   function rankExpeditions() {
     const cards = expeditionCards();
     const pageText = normalizeText(document.body?.innerText || '');
+    const historyTitles = new Set(
+      [...document.querySelectorAll('.mission-archives a strong')]
+        .map(element => normalizeText(element.textContent || ''))
+        .filter(Boolean)
+    );
+
     const pageContext = {
       teamLevel: parseTeamLevel(pageText),
       resources: parseAvailableResources(pageText),
+      historyTitles,
     };
 
     const ranking = cards
@@ -956,7 +1412,7 @@
     if (config.strategy === 'progression') {
       const viableProgression = ranking
         .filter(item =>
-          (item.chance == null || item.chance >= config.minSuccessChance) &&
+          item.failureStreak < 2 &&
           (item.requiredLevel == null || item.teamLevel == null || item.teamLevel >= item.requiredLevel)
         )
         .sort((a, b) => {
@@ -1482,8 +1938,115 @@
     return clickElement(target.anchor, `Navigation nécessaire: ${target.module.label}`);
   }
 
-  async function cycle() {
-    if (!config.enabled || running) return;
+  function orchestratorPlan() {
+    const plan = [];
+    const expeditionState = expeditionCycle();
+    const navigation = navigationCandidates()[0] || null;
+
+    if (recentBotAction() && findClickable(
+      ['confirmer', 'confirm', 'oui', 'yes', 'valider'],
+      document,
+      { exclude: ['annuler', 'cancel'] }
+    )) {
+      plan.push({
+        name: 'confirmation',
+        priority: 10000,
+        reason: 'confirmation d’une action du bot',
+        run: handleConfirmation,
+      });
+    }
+
+    if (
+      isExpeditionResultPage() ||
+      isExpeditionPreparePage() ||
+      isExpeditionIndexPage() ||
+      ['due', 'ready_to_start', 'preparing', 'starting'].includes(expeditionState.phase)
+    ) {
+      let priority = 7200;
+      let reason = 'cycle expédition';
+
+      if (isExpeditionResultPage() || expeditionState.phase === 'due') {
+        priority = 9600;
+        reason = 'résultat ou récompense d’expédition prioritaire';
+      } else if (isExpeditionPreparePage()) {
+        priority = 9000;
+        reason = 'composition/lancement d’équipe en cours';
+      } else if (expeditionState.phase === 'ready_to_start') {
+        priority = 8200;
+        reason = 'emplacement libre à utiliser';
+      }
+
+      plan.push({
+        name: 'expedition',
+        priority,
+        reason,
+        run: handleExpeditionCycle,
+      });
+    }
+
+    plan.push(
+      {
+        name: 'heal',
+        priority: 7800,
+        reason: 'soigner avant de poursuivre les activités',
+        run: healTeam,
+      },
+      {
+        name: 'incubator',
+        priority: 7400,
+        reason: 'récupération incubateur disponible',
+        run: claimIncubator,
+      },
+      {
+        name: 'breeding',
+        priority: 7300,
+        reason: 'récupération pension disponible',
+        run: claimBreeding,
+      },
+      {
+        name: 'greenhouse-harvest',
+        priority: 7100,
+        reason: 'récolte prête',
+        run: harvestGreenhouse,
+      },
+      {
+        name: 'progression',
+        priority: 5600,
+        reason: 'action explicite de progression disponible',
+        run: autoProgression,
+      },
+      {
+        name: 'greenhouse-plant',
+        priority: 3500,
+        reason: 'replantation optionnelle',
+        run: plantGreenhouse,
+      },
+    );
+
+    if (navigation) {
+      plan.push({
+        name: `navigation:${navigation.module.id}`,
+        priority: 5000 + navigation.score,
+        reason: navigation.reasons.join(', '),
+        run: navigateWhenNeeded,
+      });
+    }
+
+    return plan.sort((a, b) => b.priority - a.priority);
+  }
+
+  function recordOrchestratorDecision(candidate) {
+    state.orchestrator = {
+      lastDecision: candidate?.name || 'wait',
+      lastReason: candidate?.reason || 'aucune action nécessaire',
+      lastPriority: candidate?.priority || 0,
+    };
+    saveState(state);
+    updatePanel();
+  }
+
+  async function cycle(force = false) {
+    if ((!config.enabled && !force) || running) return;
     running = true;
 
     try {
@@ -1493,27 +2056,22 @@
       }
 
       recordCurrentModuleStatus();
+      const plan = orchestratorPlan();
 
-      const actions = [
-        handleConfirmation,
-        handleExpeditionCycle,
-        claimIncubator,
-        claimBreeding,
-        harvestGreenhouse,
-        healTeam,
-        autoProgression,
-        plantGreenhouse,
-        navigateWhenNeeded,
-      ];
-
-      for (const action of actions) {
+      for (const candidate of plan) {
         try {
-          if (await action()) return;
+          const acted = await candidate.run();
+          if (acted) {
+            recordOrchestratorDecision(candidate);
+            log('Orchestrateur:', candidate.name, candidate.priority, candidate.reason);
+            return;
+          }
         } catch (error) {
-          console.error('[PokéTaka Auto] Erreur action', action.name, error);
+          console.error('[PokéTaka Auto] Erreur orchestrateur', candidate.name, error);
         }
       }
 
+      recordOrchestratorDecision(null);
       state.lastAction = 'En attente — aucune action nécessaire';
       saveState(state);
       updatePanel();
@@ -1906,7 +2464,7 @@
       }
 
       if (action === 'run') {
-        cycle();
+        cycle(true);
         return;
       }
 
@@ -2042,6 +2600,37 @@
           </div>
         </details>
 
+        <details data-section="intelligence" ${detailsState.intelligence ? 'open' : ''}>
+          <summary>Décisions intelligentes</summary>
+          <div class="pta-modules">
+            <div class="pta-module">
+              <span class="pta-mini-dot current"></span>
+              <span class="pta-module-name">Orchestrateur</span>
+              <span class="pta-module-status" title="${escapeHtml(state.orchestrator?.lastReason || '')}">
+                ${escapeHtml(state.orchestrator?.lastDecision || 'En attente')}
+              </span>
+            </div>
+            <div class="pta-module">
+              <span class="pta-mini-dot"></span>
+              <span class="pta-module-name">Équipe</span>
+              <span class="pta-module-status">
+                ${escapeHtml((state.smartTeam?.lastSelection || []).slice(-3).join(', ') || '—')}
+              </span>
+            </div>
+            <div class="pta-module">
+              <span class="pta-mini-dot ${state.captureDecision?.action === 'capture' ? 'ready' : ''}"></span>
+              <span class="pta-module-name">Capture</span>
+              <span class="pta-module-status" title="${escapeHtml(state.captureDecision?.reason || '')}">
+                ${escapeHtml(
+                  state.captureDecision?.species
+                    ? `${state.captureDecision.species}: ${state.captureDecision.action}`
+                    : '—'
+                )}
+              </span>
+            </div>
+          </div>
+        </details>
+
         <details data-section="settings" ${detailsState.settings ? 'open' : ''}>
           <summary>Réglages automatiques</summary>
           <div class="pta-settings">
@@ -2052,18 +2641,23 @@
             ${optionButton('autoIncubatorClaim', 'Incubateur')}
             ${optionButton('autoBreedingClaim', 'Pension')}
             ${optionButton('autoProgression', 'Progression')}
-            ${optionButton('autoCapture', 'Captures')}
+            ${optionButton('smartTeam', 'Équipe intelligente')}
+            ${optionButton('autoCapture', 'Captures auto')}
+            ${optionButton('smartCapture', 'Capture intelligente')}
+            ${optionButton('captureNewSpecies', 'Nouvelles espèces')}
+            ${optionButton('captureRare', 'Rares')}
+            ${optionButton('captureUnknownEncounters', 'Captures inconnues')}
             ${optionButton('autoPlant', 'Replanter')}
           </div>
         </details>
 
-        <div class="pta-footer">Navigation intelligente · progression-first · actions destructrices bloquées</div>
+        <div class="pta-footer">Orchestrateur v0.7 · équipe intelligente · captures prudentes · actions destructrices bloquées</div>
       </div>
     `;
   }
 
   GM_registerMenuCommand('Activer / désactiver PokéTaka Automation', () => setEnabled(!config.enabled));
-  GM_registerMenuCommand('Exécuter un cycle maintenant', () => cycle());
+  GM_registerMenuCommand('Exécuter un cycle maintenant', () => cycle(true));
   GM_registerMenuCommand('Diagnostiquer le timer de la page', () => {
     const current = moduleFromLocation();
     if (!current) {
