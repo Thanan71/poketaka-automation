@@ -1166,9 +1166,16 @@ GM_addStyle(`
     const rosterAge = state.rosterSnapshot?.capturedAt
       ? formatRelativeTime(state.rosterSnapshot.capturedAt)
       : 'Jamais';
-    const missionTitle = state.selectedExpedition || state.expeditionPlan?.title || 'Aucune mission ciblée';
+    const cycle = expeditionCycle();
+    const missionTitle = ['running', 'due', 'result', 'claiming', 'opening_result']
+      .includes(cycle.phase)
+      ? (cycle.title || state.expeditionPlan?.title || state.selectedExpedition || 'Aucune mission ciblée')
+      : (state.expeditionPlan?.title || state.selectedExpedition || 'Aucune mission ciblée');
     const missionPlan = state.expeditionPlan || {};
-    const missionScore = state.selectedExpeditionScore;
+    const missionScore =
+      normalizeText(state.selectedExpedition || '') === normalizeText(missionTitle || '')
+        ? state.selectedExpeditionScore
+        : null;
     const missionReason = missionPlan.reason || state.orchestrator?.lastReason || '';
     const gym = gymCycle();
     const showGymCard =
