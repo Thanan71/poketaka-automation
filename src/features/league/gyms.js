@@ -20,6 +20,8 @@ function gymCycle() {
       selectedTeam: [],
       teamScore: null,
       reason: null,
+      needsHealing: false,
+      blockedUntil: 0,
       lastCheckAt: 0,
       lastChallengeAt: 0,
     };
@@ -175,6 +177,9 @@ function gymTeamPlan(requirement) {
   });
 
   const viable = plan.team.length >= requirement.min;
+  const needsHealing =
+    roster.length >= requirement.min &&
+    healthyRoster.length < requirement.min;
 
   state.gymCycle = {
     ...gymCycle(),
@@ -189,7 +194,11 @@ function gymTeamPlan(requirement) {
     teamScore: plan.teamScore,
     reason: viable
       ? `Équipe prête: ${plan.team.map(pokemon => pokemon.name).join(', ')}`
-      : `Seulement ${plan.team.length}/${requirement.min} Pokémon avec au moins ${config.minGymHpPercent}% PV`,
+      : needsHealing
+        ? `Soins requis: ${healthyRoster.length}/${requirement.min} Pokémon au-dessus de ${config.minGymHpPercent}% PV`
+        : `Seulement ${roster.length}/${requirement.min} Pokémon disponibles`,
+    needsHealing,
+    blockedUntil: viable || needsHealing ? 0 : now() + config.gymRetryMinutes * 60 * 1000,
     lastCheckAt: now(),
   };
   saveState(state);
@@ -244,7 +253,15 @@ function leagueNeedsDailyCheck() {
   const gym = gymCycle();
   const today = localDayKey();
 
+  if (gym.phase === 'blocked' && gym.blockedUntil && gym.blockedUntil > now()) {
+    return false;
+  }
+
   if (gym.availableToday === true) return true;
+  if (gym.phase === 'blocked' && (!gym.blockedUntil || gym.blockedUntil <= now())) {
+    return true;
+  }
+
   return gym.checkedDay !== today;
 }
 
@@ -290,7 +307,7 @@ async function handleLeagueAutomation() {
     const progress = parseGymProgress();
     const gym = availableGymContext();
 
-    if (dailyAvailable === false || !gym) {
+    if (dailyAvailable === false) {
       setGymCycle('done', {
         checkedDay: today,
         availableToday: false,
@@ -302,8 +319,29 @@ async function handleLeagueAutomation() {
         requiredTeamSize: null,
         selectedTeam: [],
         teamScore: null,
-        reason: dailyAvailable === false
-          ? 'Combat du jour déjà utilisé ou indisponible'
+        needsHealing: false,
+        blockedUntil: 0,
+        reason: 'Combat du jour déjà utilisé ou indisponible',
+      });
+      return false;
+    }
+
+    if (!gym) {
+      setGymCycle('blocked', {
+        checkedDay: today,
+        availableToday: dailyAvailable === true ? true : null,
+        badges: progress.badges,
+        totalBadges: progress.totalBadges,
+        arena: null,
+        champion: null,
+        badge: null,
+        requiredTeamSize: null,
+        selectedTeam: [],
+        teamScore: null,
+        needsHealing: false,
+        blockedUntil: now() + config.gymRetryMinutes * 60 * 1000,
+        reason: dailyAvailable === true
+          ? 'Combat du jour disponible, mais aucune arène n’est encore débloquée'
           : 'Aucune arène disponible actuellement',
       });
       return false;
@@ -319,6 +357,8 @@ async function handleLeagueAutomation() {
       badge: gym.badge,
       requiredTeamSize: gym.teamSize,
       reason: `${gym.badge || 'Badge'} · équipe de ${gym.teamSize || '?'}`,
+      needsHealing: false,
+      blockedUntil: 0,
     });
 
     if (recentBotAction(1800)) return false;
