@@ -21,7 +21,7 @@ function detachedActiveExpeditionSnapshot(root) {
   const card = root.querySelector('.mission-slot-card--occupied');
   if (!card) return null;
 
-  const title = normalizeText(card.querySelector('h3')?.textContent || '') || 'expedition active';
+  const title = card.querySelector('h3')?.textContent?.trim() || 'Expédition active';
   const timer = card.querySelector('time[data-countdown][data-countdown-format="expedition"]');
   const progress = card.querySelector('progress[data-mission-progress][data-progress-end]');
   const follow = card.querySelector('a[href*="/expeditions/results/"]');
@@ -236,6 +236,15 @@ async function backgroundObserveExpeditions() {
       resultUrl: active.resultUrl,
       dueAt,
     });
+
+    const activeTitleChanged =
+      normalizeText(state.selectedExpedition || '') !==
+      normalizeText(active.title || '');
+
+    if (activeTitleChanged) {
+      state.selectedExpedition = active.title;
+      state.selectedExpeditionScore = null;
+    }
 
     if (
       normalizeText(state.expeditionPlan?.title || '') !==
