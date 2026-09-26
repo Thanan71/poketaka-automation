@@ -5,6 +5,7 @@ const captureSource = fs.readFileSync('src/features/expeditions/capture.js', 'ut
 const teamSource = fs.readFileSync('src/features/expeditions/team.js', 'utf8');
 const gymSource = fs.readFileSync('src/features/league/gyms.js', 'utf8');
 const pokemonSource = fs.readFileSync('src/features/pokemon/progression.js', 'utf8');
+const cycleSource = fs.readFileSync('src/features/expeditions/cycle.js', 'utf8');
 
 const location = {
   href: 'https://poketaka.fr/expeditions',
@@ -50,6 +51,11 @@ assertEqual(
   api.directActionKind('https://poketaka.fr/expeditions/route-1/launch'),
   'expedition_launch',
   'expedition launch endpoint'
+);
+assertEqual(
+  api.directActionKind('https://poketaka.fr/expeditions/results/run-id/claim'),
+  'expedition_claim',
+  'expedition reward claim endpoint'
 );
 assertEqual(
   api.directActionKind('https://poketaka.fr/gyms/horizon/challenge'),
@@ -102,8 +108,12 @@ if (!pokemonSource.includes("expectedKind: 'pokemon_level_up'")) {
 if (!pokemonSource.includes("expectedKind: 'pokemon_evolve'")) {
   throw new Error('evolution must use the direct HTTP transport');
 }
+if (!cycleSource.includes("expectedKind: 'expedition_claim'")) {
+  throw new Error('visible expedition rewards must use the direct HTTP claim transport');
+}
 
 console.log('Direct HTTP endpoint whitelist: OK');
 console.log('Unsafe/destructive endpoints blocked: OK');
 console.log('Observed CSRF/idempotency transport: OK');
 console.log('Capture/expedition/gym/level/evolution direct POST wiring: OK');
+console.log('Expedition reward claim endpoint + direct POST wiring: OK');
