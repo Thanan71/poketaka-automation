@@ -2,7 +2,7 @@
 (() => {
   'use strict';
 
-  const VERSION = "0.8.6";
+  const VERSION = "0.8.7";
 
 // ---- src/core/config.js ----
 const STORAGE_KEY = 'poketaka-automation:config';
@@ -19,6 +19,9 @@ const STORAGE_KEY = 'poketaka-automation:config';
     autoIncubatorClaim: true,
     autoBreedingClaim: true,
     autoProgression: true,
+    autoGyms: true,
+    minGymHpPercent: 70,
+    gymRetryMinutes: 30,
     strategy: 'progression',
     minSuccessChance: 55,
     avoidLongLowValue: true,
@@ -154,6 +157,24 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
       },
       expeditionStats: {},
       lastRecordedResultUrl: null,
+      gymCycle: {
+        phase: 'unknown',
+        checkedDay: null,
+        availableToday: null,
+        arena: null,
+        champion: null,
+        badge: null,
+        badges: null,
+        totalBadges: 8,
+        requiredTeamSize: null,
+        selectedTeam: [],
+        teamScore: null,
+        reason: null,
+        needsHealing: false,
+        blockedUntil: 0,
+        lastCheckAt: 0,
+        lastChallengeAt: 0,
+      },
       orchestrator: {
         lastDecision: null,
         lastReason: null,
@@ -771,6 +792,448 @@ async function handleExpeditionPreparation() {
     if (recentBotAction(1800)) return false;
     setExpeditionPhase('starting');
     return clickElement(launchButton, 'Lancement de l’expédition');
+  }
+
+  return false;
+}
+
+// ---- src/features/league/gyms.js ----
+function localDayKey(timestamp = new Date()) {
+  const year = timestamp.getFullYear();
+  const month = String(timestamp.getMonth() + 1).padStart(2, '0');
+  const day = String(timestamp.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function gymCycle() {
+  if (!state.gymCycle || typeof state.gymCycle !== 'object') {
+    state.gymCycle = {
+      phase: 'unknown',
+      checkedDay: null,
+      availableToday: null,
+      arena: null,
+      champion: null,
+      badge: null,
+      badges: null,
+      totalBadges: 8,
+      requiredTeamSize: null,
+      selectedTeam: [],
+      teamScore: null,
+      reason: null,
+      needsHealing: false,
+      blockedUntil: 0,
+      lastCheckAt: 0,
+      lastChallengeAt: 0,
+    };
+  }
+  return state.gymCycle;
+}
+
+function setGymCycle(phase, patch = {}) {
+  const previous = gymCycle();
+  state.gymCycle = {
+    ...previous,
+    ...patch,
+    phase,
+    lastCheckAt: now(),
+  };
+  saveState(state);
+  updatePanel();
+  log('Cycle arène:', state.gymCycle);
+}
+
+function isLeagueIndexPage() {
+  return /^\/league\/?$/.test(location.pathname);
+}
+
+function isGymPreparePage() {
+  return /^\/gyms\/[^/]+\/prepare\/?$/.test(location.pathname);
+}
+
+function isGymResultLikePage() {
+  return /^\/gyms\/[^/]+\/(?!prepare\/?$)[^/]+\/?$/.test(location.pathname);
+}
+
+function gymReturnToCircuitLink() {
+  return [...document.querySelectorAll('a[href]')]
+    .filter(isVisible)
+    .find(anchor => {
+      try {
+        const url = new URL(anchor.href, location.href);
+        return url.origin === location.origin && /^\/league\/?$/.test(url.pathname);
+      } catch {
+        return false;
+      }
+    }) || null;
+}
+
+function gymPreparationForm() {
+  if (!isGymPreparePage()) return null;
+  return document.querySelector(
+    'form[data-team-builder][action*="/gyms/"][action$="/challenge"]'
+  );
+}
+
+function parseGymProgress() {
+  const progress = document.querySelector('.gym-progress');
+  if (!progress) return { badges: null, totalBadges: 8 };
+
+  const text = normalizeText(
+    progress.getAttribute('aria-label') ||
+    progress.querySelector('strong')?.textContent ||
+    progress.textContent ||
+    ''
+  );
+  const match = text.match(/(\d+)\s*\/\s*(\d+)/);
+  return {
+    badges: match ? Number(match[1]) : null,
+    totalBadges: match ? Number(match[2]) : 8,
+  };
+}
+
+function leagueDailyStatus() {
+  if (!isLeagueIndexPage()) return null;
+
+  const headerText = normalizeText(
+    document.querySelector('.page-header__actions')?.textContent || ''
+  );
+
+  if (/combat du jour disponible|daily battle available/.test(headerText)) {
+    return true;
+  }
+
+  if (
+    /combat du jour (?:deja )?(?:utilise|termine|indisponible)|daily battle (?:used|completed|unavailable)/.test(headerText)
+  ) {
+    return false;
+  }
+
+  return null;
+}
+
+function availableGymContext() {
+  if (!isLeagueIndexPage()) return null;
+
+  const card = document.querySelector(
+    '.gym-circuit--available .gym-card--available, .gym-card.gym-card--available'
+  );
+  if (!card || !isVisible(card)) return null;
+
+  const prepare = card.querySelector(
+    'a.primary-button[href*="/gyms/"][href$="/prepare"], a[href*="/gyms/"][href$="/prepare"]'
+  );
+  if (!prepare || !isVisible(prepare)) return null;
+
+  const facts = normalizeText(card.textContent || '');
+  const teamSizeMatch = facts.match(/equipe de\s*(\d+)\s*pokemon/i);
+
+  return {
+    card,
+    prepare,
+    arena: card.querySelector('.gym-card__identity h3, h3')?.textContent?.trim() || 'Arène',
+    champion:
+      card.querySelector('.gym-card__identity p:last-child')?.textContent
+        ?.replace(/^\s*Champion\s*:\s*/i, '')
+        .trim() || null,
+    badge: card.querySelector('.gym-card__identity .card-label, .card-label')?.textContent?.trim() || null,
+    rank: parseNumber(card.querySelector('.gym-rank')?.textContent?.match(/\d+/)?.[0]),
+    teamSize: teamSizeMatch ? Number(teamSizeMatch[1]) : null,
+  };
+}
+
+function gymPrepareContext(requirement) {
+  const form = requirement?.form;
+  if (!form) return null;
+
+  const root = form.closest('main') || document;
+  const title = root.querySelector('.page-header h1, h1')?.textContent?.trim() || 'Arène';
+  const hero = root.querySelector('.gym-preparation-hero');
+  const champion = hero?.querySelector('h2')?.textContent?.trim() || null;
+  const badge = hero?.querySelector('.card-label')?.textContent?.trim() || null;
+
+  return {
+    title,
+    champion,
+    badge,
+    missionTypes: [],
+    recommendedLevel: null,
+    teamSize: requirement.min,
+  };
+}
+
+function gymTeamPlan(requirement) {
+  const roster = updateRosterSnapshot(requirement);
+  const context = gymPrepareContext(requirement);
+
+  const healthyRoster = roster.filter(
+    pokemon => pokemon.hpPercent >= config.minGymHpPercent
+  );
+
+  const plan = chooseTeamForMission(healthyRoster, {
+    title: context?.title || 'Arène',
+    missionTypes: [],
+    recommendedLevel: null,
+    teamSize: requirement.min,
+  });
+
+  const viable = plan.team.length >= requirement.min;
+  const needsHealing =
+    roster.length >= requirement.min &&
+    healthyRoster.length < requirement.min;
+
+  state.gymCycle = {
+    ...gymCycle(),
+    phase: viable ? 'preparing' : 'blocked',
+    checkedDay: localDayKey(),
+    availableToday: true,
+    arena: context?.title || gymCycle().arena,
+    champion: context?.champion || gymCycle().champion,
+    badge: context?.badge || gymCycle().badge,
+    requiredTeamSize: requirement.min,
+    selectedTeam: plan.team.map(pokemon => pokemon.name),
+    teamScore: plan.teamScore,
+    reason: viable
+      ? `Équipe prête: ${plan.team.map(pokemon => pokemon.name).join(', ')}`
+      : needsHealing
+        ? `Soins requis: ${healthyRoster.length}/${requirement.min} Pokémon au-dessus de ${config.minGymHpPercent}% PV`
+        : `Seulement ${roster.length}/${requirement.min} Pokémon disponibles`,
+    needsHealing,
+    blockedUntil: viable || needsHealing ? 0 : now() + config.gymRetryMinutes * 60 * 1000,
+    lastCheckAt: now(),
+  };
+  saveState(state);
+  updatePanel();
+
+  return {
+    context,
+    plan: {
+      ...plan,
+      viable,
+    },
+  };
+}
+
+async function selectNextGymPokemon(requirement, assessment) {
+  const selected = new Set(requirement.selectedIds || []);
+  const next = assessment.plan.team.find(pokemon => !selected.has(pokemon.id));
+  if (!next) return false;
+
+  const select = [...requirement.form.querySelectorAll('select[data-team-select]')]
+    .find(input =>
+      !input.value &&
+      [...input.options].some(option => option.value === next.id)
+    );
+
+  if (!select) return false;
+
+  select.value = next.id;
+  select.dispatchEvent(new Event('input', { bubbles: true }));
+  select.dispatchEvent(new Event('change', { bubbles: true }));
+
+  state.lastAction = `Arène: sélection de ${next.name} (score ${next.score})`;
+  state.lastActionAt = now();
+  state.lastBotClickAt = now();
+  state.actions += 1;
+  state.gymCycle = {
+    ...gymCycle(),
+    phase: 'preparing',
+    selectedTeam: assessment.plan.team.map(pokemon => pokemon.name),
+    teamScore: assessment.plan.teamScore,
+    reason: `Composition en cours ${requirement.selected + 1}/${requirement.min}`,
+    lastCheckAt: now(),
+  };
+  saveState(state);
+  updatePanel();
+  log('Arène: sélection Pokémon', next);
+  return true;
+}
+
+function leagueNeedsDailyCheck() {
+  if (!config.autoGyms) return false;
+  const gym = gymCycle();
+  const today = localDayKey();
+
+  if (gym.phase === 'blocked' && gym.blockedUntil && gym.blockedUntil > now()) {
+    return false;
+  }
+
+  if (gym.availableToday === true) return true;
+  if (gym.phase === 'blocked' && (!gym.blockedUntil || gym.blockedUntil <= now())) {
+    return true;
+  }
+
+  return gym.checkedDay !== today;
+}
+
+function leagueAttentionReason() {
+  const gym = gymCycle();
+  if (gym.availableToday === true) {
+    return gym.arena
+      ? `combat d’arène disponible: ${gym.arena}`
+      : 'combat d’arène disponible';
+  }
+  if (gym.checkedDay !== localDayKey()) {
+    return 'vérification quotidienne du Circuit des Arènes';
+  }
+  return null;
+}
+
+async function handleLeagueAutomation() {
+  if (!config.autoGyms) return false;
+
+  if (isGymResultLikePage()) {
+    const returnLink = gymReturnToCircuitLink();
+    if (!returnLink) return false;
+
+    if (now() - (gymCycle().lastChallengeAt || 0) < 2500) {
+      return false;
+    }
+
+    state.gymCycle = {
+      ...gymCycle(),
+      phase: 'result',
+      reason: 'Combat résolu — retour au Circuit pour actualiser la progression',
+      lastCheckAt: now(),
+    };
+    saveState(state);
+    updatePanel();
+
+    return clickElement(returnLink, 'Arène: retour au Circuit');
+  }
+
+  if (isLeagueIndexPage()) {
+    const today = localDayKey();
+    const dailyAvailable = leagueDailyStatus();
+    const progress = parseGymProgress();
+    const gym = availableGymContext();
+
+    if (dailyAvailable === false) {
+      setGymCycle('done', {
+        checkedDay: today,
+        availableToday: false,
+        badges: progress.badges,
+        totalBadges: progress.totalBadges,
+        arena: null,
+        champion: null,
+        badge: null,
+        requiredTeamSize: null,
+        selectedTeam: [],
+        teamScore: null,
+        needsHealing: false,
+        blockedUntil: 0,
+        reason: 'Combat du jour déjà utilisé ou indisponible',
+      });
+      return false;
+    }
+
+    if (!gym) {
+      setGymCycle('blocked', {
+        checkedDay: today,
+        availableToday: dailyAvailable === true ? true : null,
+        badges: progress.badges,
+        totalBadges: progress.totalBadges,
+        arena: null,
+        champion: null,
+        badge: null,
+        requiredTeamSize: null,
+        selectedTeam: [],
+        teamScore: null,
+        needsHealing: false,
+        blockedUntil: now() + config.gymRetryMinutes * 60 * 1000,
+        reason: dailyAvailable === true
+          ? 'Combat du jour disponible, mais aucune arène n’est encore débloquée'
+          : 'Aucune arène disponible actuellement',
+      });
+      return false;
+    }
+
+    setGymCycle('available', {
+      checkedDay: today,
+      availableToday: dailyAvailable !== false,
+      badges: progress.badges,
+      totalBadges: progress.totalBadges,
+      arena: gym.arena,
+      champion: gym.champion,
+      badge: gym.badge,
+      requiredTeamSize: gym.teamSize,
+      reason: `${gym.badge || 'Badge'} · équipe de ${gym.teamSize || '?'}`,
+      needsHealing: false,
+      blockedUntil: 0,
+    });
+
+    if (recentBotAction(1800)) return false;
+
+    setGymCycle('opening_prepare', {
+      arena: gym.arena,
+      champion: gym.champion,
+      badge: gym.badge,
+    });
+    return clickElement(
+      gym.prepare,
+      `Arène: préparer ${gym.arena}`
+    );
+  }
+
+  if (isGymPreparePage()) {
+    const form = gymPreparationForm();
+    if (!form) return false;
+
+    const requirement = expeditionTeamRequirement();
+    if (!requirement || requirement.form !== form) return false;
+
+    const assessment = gymTeamPlan(requirement);
+
+    if (!assessment.plan.viable) {
+      state.lastAction = `Arène bloquée — ${gymCycle().reason}`;
+      saveState(state);
+      updatePanel();
+      return false;
+    }
+
+    if (requirement.selected < requirement.min) {
+      return selectNextGymPokemon(requirement, assessment);
+    }
+
+    const chosenIds = new Set(requirement.selectedIds);
+    const plannedIds = new Set(assessment.plan.team.map(pokemon => pokemon.id));
+    const selectionMatchesPlan =
+      chosenIds.size === plannedIds.size &&
+      [...plannedIds].every(id => chosenIds.has(id));
+
+    if (!selectionMatchesPlan) {
+      state.gymCycle = {
+        ...gymCycle(),
+        phase: 'blocked',
+        reason: 'La sélection actuelle ne correspond pas au plan intelligent',
+      };
+      state.lastAction = 'Arène: composition inattendue — lancement suspendu';
+      saveState(state);
+      updatePanel();
+      return false;
+    }
+
+    const challenge = form.querySelector(
+      'footer.expedition-prep-submit button.primary-button[type="submit"], button.primary-button[type="submit"]'
+    );
+
+    if (!challenge || !isVisible(challenge) || challenge.disabled) return false;
+    if (recentBotAction(1800)) return false;
+
+    state.gymCycle = {
+      ...gymCycle(),
+      phase: 'challenging',
+      selectedTeam: assessment.plan.team.map(pokemon => pokemon.name),
+      teamScore: assessment.plan.teamScore,
+      reason: `Défi lancé avec ${assessment.plan.team.map(pokemon => pokemon.name).join(', ')}`,
+      lastChallengeAt: now(),
+    };
+    saveState(state);
+    updatePanel();
+
+    return clickElement(
+      challenge,
+      `Arène: défier ${assessment.context?.champion || assessment.context?.title || 'le Champion'}`
+    );
   }
 
   return false;
@@ -1940,7 +2403,7 @@ function moduleEnabled(moduleId) {
       greenhouse: config.autoHarvest || config.autoPlant,
       incubator: config.autoIncubatorClaim,
       breeding: config.autoBreedingClaim,
-      progression: config.autoProgression,
+      progression: config.autoProgression || config.autoGyms,
     };
     return Boolean(rules[moduleId]);
   }
@@ -2378,6 +2841,22 @@ function moduleEnabled(moduleId) {
           reasons.push('équipe détectée KO/blessée');
         }
 
+        if (
+          module.id === 'healing' &&
+          config.autoGyms &&
+          gymCycle().needsHealing
+        ) {
+          score += 1250;
+          reasons.push('soins nécessaires avant le combat d’arène');
+        }
+
+        if (module.id === 'progression' && config.autoGyms && leagueNeedsDailyCheck()) {
+          const gymReason = leagueAttentionReason();
+          const knownAvailable = gymCycle().availableToday === true;
+          score += knownAvailable ? 1300 : 520;
+          reasons.push(gymReason || 'vérification quotidienne des arènes');
+        }
+
         const expeditionState = expeditionCycle();
         if (
           module.id === 'expeditions' &&
@@ -2429,6 +2908,32 @@ function moduleEnabled(moduleId) {
         priority: 10000,
         reason: 'confirmation d’une action du bot',
         run: handleConfirmation,
+      });
+    }
+
+    if (
+      config.autoGyms &&
+      (isLeagueIndexPage() || isGymPreparePage() || isGymResultLikePage())
+    ) {
+      let priority = 8350;
+      let reason = 'vérification du Circuit des Arènes';
+
+      if (isGymPreparePage()) {
+        priority = 9350;
+        reason = 'composition et lancement du combat d’arène';
+      } else if (isGymResultLikePage()) {
+        priority = 9200;
+        reason = 'résultat d’arène à clôturer';
+      } else if (leagueDailyStatus() === true && availableGymContext()) {
+        priority = 8500;
+        reason = 'combat d’arène du jour disponible';
+      }
+
+      plan.push({
+        name: 'gym',
+        priority,
+        reason,
+        run: handleLeagueAutomation,
       });
     }
 
@@ -3290,6 +3795,27 @@ GM_addStyle(`
     const current = moduleFromLocation();
     const status = state.moduleStatus?.[module.id] || {};
 
+    if (module.id === 'progression' && config.autoGyms) {
+      const gym = gymCycle();
+      const badgeText = gym.badges != null
+        ? `${gym.badges}/${gym.totalBadges || 8}`
+        : null;
+
+      if (gym.availableToday === true) {
+        return {
+          className: 'ready',
+          label: badgeText ? `Arène dispo · ${badgeText}` : 'Arène disponible',
+        };
+      }
+
+      if (gym.checkedDay === localDayKey() && gym.availableToday === false) {
+        return {
+          className: '',
+          label: badgeText ? `Vérifié · ${badgeText}` : 'Vérifié aujourd’hui',
+        };
+      }
+    }
+
     if (current?.id === module.id) {
       if (status.nextDueAt) {
         const remaining = formatRemaining(status.nextDueAt);
@@ -3530,6 +4056,16 @@ GM_addStyle(`
         return;
       }
 
+      if (action === 'gym-hp-dec') {
+        stepCaptureSetting('minGymHpPercent', -5, 10, 100);
+        return;
+      }
+
+      if (action === 'gym-hp-inc') {
+        stepCaptureSetting('minGymHpPercent', 5, 10, 100);
+        return;
+      }
+
       if (action === 'ranking') {
         const ranking = rankExpeditions();
         if (!ranking.length) {
@@ -3606,6 +4142,32 @@ GM_addStyle(`
     const missionPlan = state.expeditionPlan || {};
     const missionScore = state.selectedExpeditionScore;
     const missionReason = missionPlan.reason || state.orchestrator?.lastReason || '';
+    const gym = gymCycle();
+    const showGymCard =
+      config.autoGyms &&
+      (
+        isLeagueIndexPage() ||
+        isGymPreparePage() ||
+        gym.availableToday === true ||
+        gym.checkedDay === localDayKey()
+      );
+    const gymPhaseLabels = {
+      unknown: 'Non vérifié',
+      available: 'Disponible',
+      opening_prepare: 'Ouverture',
+      preparing: 'Préparation',
+      challenging: 'Combat',
+      blocked: 'Bloqué',
+      done: 'Terminé',
+    };
+    const gymTone = gym.phase === 'available'
+      ? 'ready'
+      : gym.phase === 'blocked'
+        ? 'danger'
+        : ['opening_prepare', 'preparing', 'challenging'].includes(gym.phase)
+          ? 'current'
+          : '';
+    const gymTitle = gym.arena || 'Circuit des Arènes';
     const nextText = next
       ? `${next.module.label} · ${formatRemaining(next.dueAt)}`
       : 'Aucune';
@@ -3618,6 +4180,7 @@ GM_addStyle(`
       'autoIncubatorClaim',
       'autoBreedingClaim',
       'autoProgression',
+      'autoGyms',
       'autoPlant',
     ];
     const intelligenceKeys = ['smartTeam'];
@@ -3781,6 +4344,38 @@ GM_addStyle(`
           ` : ''}
         </section>
 
+        ${showGymCard ? `
+          <section class="pta-mission" aria-label="Automatisation des arènes">
+            <div class="pta-mission-head">
+              <div class="pta-mission-name" title="${escapeHtml(gymTitle)}">
+                ${escapeHtml(gymTitle)}
+              </div>
+              <span class="pta-badge ${gymTone}">
+                ${escapeHtml(gymPhaseLabels[gym.phase] || gym.phase || 'Arènes')}
+              </span>
+            </div>
+
+            <div class="pta-chip-row">
+              ${gym.badges != null ? chipHtml(`Badges · ${gym.badges}/${gym.totalBadges || 8}`) : ''}
+              ${gym.badge ? chipHtml(gym.badge) : ''}
+              ${gym.champion ? chipHtml(`Champion · ${gym.champion}`) : ''}
+              ${gym.requiredTeamSize ? chipHtml(`Équipe · ${gym.requiredTeamSize}`) : ''}
+            </div>
+
+            ${Array.isArray(gym.selectedTeam) && gym.selectedTeam.length ? `
+              <div class="pta-chip-row">
+                ${gym.selectedTeam.map(name => chipHtml(name)).join('')}
+              </div>
+            ` : ''}
+
+            ${gym.reason ? `
+              <div class="pta-status-copy" title="${escapeHtml(gym.reason)}">
+                ${escapeHtml(gym.reason)}
+              </div>
+            ` : ''}
+          </section>
+        ` : ''}
+
         ${captureView.active ? `
           <section class="pta-capture-card" data-tone="${captureTone || 'neutral'}" aria-label="Décision de capture">
             <div class="pta-capture-head">
@@ -3899,7 +4494,20 @@ GM_addStyle(`
             ${optionButton('autoIncubatorClaim', 'Incubateur')}
             ${optionButton('autoBreedingClaim', 'Pension')}
             ${optionButton('autoProgression', 'Progression')}
+            ${optionButton('autoGyms', 'Arènes auto')}
             ${optionButton('autoPlant', 'Replanter')}
+
+            <div class="pta-stepper">
+              <div class="pta-stepper-label">
+                PV minimum Arènes
+                <small>Le défi quotidien n’est lancé qu’avec une équipe suffisamment saine</small>
+              </div>
+              <div class="pta-stepper-value">${config.minGymHpPercent}%</div>
+              <div class="pta-stepper-controls">
+                <button class="pta-stepper-btn" data-action="gym-hp-dec" title="Réduire le seuil de PV">−</button>
+                <button class="pta-stepper-btn" data-action="gym-hp-inc" title="Augmenter le seuil de PV">+</button>
+              </div>
+            </div>
           </div>
         </details>
 
