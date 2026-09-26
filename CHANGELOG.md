@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.9.6 - 2026-09-26
+
+- Correction de `selectedExpedition` qui pouvait rester sur une ancienne mission pendant qu'une autre expédition était réellement active.
+- Lorsqu'un GET silencieux observe une expédition active différente, `selectedExpedition` est maintenant resynchronisé immédiatement et l'ancien score est invalidé.
+- Le nom d'une expédition active conserve désormais sa casse d'affichage au lieu d'être stocké normalisé.
+- La carte "Plan d'expédition" du panel donne priorité à `expeditionCycle.title` pour les phases actives/résultat.
+- Le panel ne peut donc plus afficher "Sentier du Professeur" pendant que Route 1 est réellement en cours.
+- Ajout de tests CI pour la synchronisation de la sélection active et la priorité d'affichage de la mission réelle.
+
+
 ## 0.9.5 - 2026-09-26
 
 - Correction d'un état `expeditionPlan` périmé en mode GET silencieux.
