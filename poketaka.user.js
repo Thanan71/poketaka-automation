@@ -1246,14 +1246,17 @@
       details?.textContent || '',
     ].join(' '));
 
+    const title = expeditionTitle(card, index);
     const chance = parseChance(text);
     const durationMinutes = parseDurationMinutes(text);
     const requiredLevel = parseRequiredLevel(text);
     const rewardScore = parseRewardValue(text);
     const costs = parseResourceCost(text);
     const progressionRank = zoneRank(text, index);
-    const newProgression = isNewProgression(text);
-    const completed = isPreviouslyCompleted(text);
+    const completed = pageContext.historyTitles?.has(title) || isPreviouslyCompleted(text);
+    const newProgression = !completed || isNewProgression(text);
+    const stats = state.expeditionStats?.[title] || {};
+    const failureStreak = Number(stats.failureStreak || 0);
     const startButton = expeditionPrepareLink(card);
 
     let score = progressionRank * 6;
@@ -1267,6 +1270,14 @@
     if (completed) {
       score -= 45;
       reasons.push('-45 déjà terminée');
+    }
+
+    if (failureStreak > 0) {
+      const failurePenalty = failureStreak >= 2
+        ? 650 + (failureStreak - 2) * 180
+        : 180;
+      score -= failurePenalty;
+      reasons.push(`-${failurePenalty} échecs consécutifs (${failureStreak})`);
     }
 
     if (chance != null) {
@@ -1330,7 +1341,7 @@
       card,
       button: startButton,
       index,
-      title: expeditionTitle(card, index),
+      title,
       chance,
       durationMinutes,
       requiredLevel,
@@ -1339,6 +1350,7 @@
       progressionRank,
       newProgression,
       completed,
+      failureStreak,
       energyCost: costs.energy,
       energyAvailable: pageContext.resources.energy,
       score: Math.round(score),
@@ -1349,9 +1361,16 @@
   function rankExpeditions() {
     const cards = expeditionCards();
     const pageText = normalizeText(document.body?.innerText || '');
+    const historyTitles = new Set(
+      [...document.querySelectorAll('.mission-archives a strong')]
+        .map(element => normalizeText(element.textContent || ''))
+        .filter(Boolean)
+    );
+
     const pageContext = {
       teamLevel: parseTeamLevel(pageText),
       resources: parseAvailableResources(pageText),
+      historyTitles,
     };
 
     const ranking = cards
