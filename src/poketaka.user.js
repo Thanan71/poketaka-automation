@@ -682,7 +682,7 @@
       [current.id]: {
         ...previous,
         lastVisitedAt: now(),
-        nextDueAt: countdownMs ? now() + countdownMs : previous.nextDueAt || null,
+        nextDueAt: countdownMs ? now() + countdownMs : null,
       },
     };
     saveState(state);
