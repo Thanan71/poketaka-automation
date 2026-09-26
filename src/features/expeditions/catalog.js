@@ -409,8 +409,36 @@ async function startExpedition() {
   }
 
   let selected = ranking.find(item => !item.blocked) || ranking[0];
+  const goal = currentGoalPlan();
+  const targetExpedition = goalTargetExpedition();
 
-  if (config.strategy === 'progression') {
+  if (targetExpedition) {
+    const target = normalizeText(targetExpedition);
+    const exact = ranking.find(item =>
+      normalizeText(item.title) === target &&
+      !item.blocked &&
+      item.failureStreak < 2 &&
+      item.teamPlan.viable !== false
+    );
+
+    if (exact) {
+      selected = exact;
+    }
+  } else if (goal.step?.action === 'farm_captures') {
+    const captureCandidates = ranking
+      .filter(item => !item.blocked)
+      .filter(item => item.failureStreak < 2)
+      .filter(item => item.teamPlan.viable !== false)
+      .sort((a, b) => {
+        const chanceDelta = Number(b.chance || 0) - Number(a.chance || 0);
+        if (chanceDelta) return chanceDelta;
+        const durationA = a.durationMinutes ?? Infinity;
+        const durationB = b.durationMinutes ?? Infinity;
+        return durationA - durationB;
+      });
+
+    if (captureCandidates.length) selected = captureCandidates[0];
+  } else if (config.strategy === 'progression') {
     const candidates = expeditionProgressionCandidates(ranking);
     if (candidates.length) selected = candidates[0];
   }
@@ -425,7 +453,9 @@ async function startExpedition() {
     viability: selected.teamPlan.known
       ? (selected.teamPlan.viable ? 'viable' : 'blocked')
       : 'unknown',
-    reason: selected.teamPlan.reason,
+    reason: targetExpedition
+      ? `Objectif global: ${goal.step?.title} · ${selected.teamPlan.reason}`
+      : selected.teamPlan.reason,
     updatedAt: now(),
   };
   saveState(state);
