@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.13 - 2026-09-26
+
+- Correction du classement des expéditions lorsqu'il est exécuté sur le DOM téléchargé par le mode GET silencieux.
+- Les liens natifs `/expeditions/*/prepare` d'un document détaché ne sont plus rejetés par `isVisible()`.
+- Un slot libre peut donc réellement enchaîner vers la préparation/lancement de la mission suivante en arrière-plan.
+- Ajout d'un test LinkeDOM reproduisant un catalogue téléchargé avec un lien de préparation non rendu visuellement.
+- Ajout d'un log explicite si un slot est libre mais qu'aucune mission lançable n'est détectée, avec le nombre de cartes et le nombre d'entrées classées.
+
 ## 0.9.12 - 2026-09-26
 
 - Correction de la reprise du cycle après récupération réussie des récompenses d'expédition.

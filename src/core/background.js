@@ -801,7 +801,20 @@ async function backgroundStartExpedition(expeditionPage) {
 
   const ranking = rankExpeditions(expeditionPage.doc);
   const selected = selectExpeditionFromRanking(ranking);
-  if (!selected?.button) return false;
+  if (!selected?.button) {
+    appendActionLog(
+      'warning',
+      'expedition',
+      'Slot libre mais aucune expédition lançable détectée',
+      {
+        availableCards: expeditionPage.doc.querySelectorAll(
+          '.mission-catalog[data-panel="available"] .mission-card, .mission-catalog__grid > .mission-card'
+        ).length,
+        rankingCount: ranking.length,
+      }
+    );
+    return false;
+  }
 
   const prepareUrl = selected.button.href || selected.button.getAttribute('href');
   if (!prepareUrl) return false;

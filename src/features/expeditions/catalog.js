@@ -4,8 +4,20 @@ function expeditionPrepareLink(card) {
     const direct = card.querySelector(
       'a[href*="/expeditions/"][href$="/prepare"], a.primary-button[href*="/prepare"], a[href*="/prepare"]'
     );
+    const requiresVisibility =
+      typeof document !== 'undefined' &&
+      card.ownerDocument === document;
 
-    if (direct && isVisible(direct) && !direct.hasAttribute('disabled')) return direct;
+    if (
+      direct &&
+      !direct.hasAttribute('disabled') &&
+      !direct.hasAttribute('aria-disabled') &&
+      (!requiresVisibility || isVisible(direct))
+    ) {
+      return direct;
+    }
+
+    if (!requiresVisibility) return null;
 
     return findClickable([
       'preparer l expedition', 'preparer expedition',
