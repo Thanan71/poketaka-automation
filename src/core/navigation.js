@@ -6,6 +6,7 @@ function moduleEnabled(moduleId) {
       incubator: config.autoIncubatorClaim,
       breeding: config.autoBreedingClaim,
       progression: config.autoProgression || config.autoGyms,
+      pokemon: config.autoLevelPokemon || config.autoEvolvePokemon,
     };
     return Boolean(rules[moduleId]);
   }
@@ -465,6 +466,11 @@ function moduleEnabled(moduleId) {
           reasons.push(gymReason || 'vérification quotidienne des arènes');
         }
 
+        if (module.id === 'pokemon' && pokemonProgressionScanDue()) {
+          score += 760;
+          reasons.push('analyse renforcement/évolution disponible');
+        }
+
         const expeditionState = expeditionCycle();
         if (
           module.id === 'expeditions' &&
@@ -516,6 +522,24 @@ function moduleEnabled(moduleId) {
         priority: 10000,
         reason: 'confirmation d’une action du bot',
         run: handleConfirmation,
+      });
+    }
+
+    if (
+      (config.autoLevelPokemon || config.autoEvolvePokemon) &&
+      (isCollectionIndexPage() || isPokemonProfilePage()) &&
+      (
+        pokemonProgressionScanDue() ||
+        ['scanning', 'opening_profile', 'level_ready', 'evolution_ready', 'scanned', 'blocked', 'manual'].includes(
+          pokemonProgressionState().phase
+        )
+      )
+    ) {
+      plan.push({
+        name: 'pokemon-progression',
+        priority: 6750,
+        reason: pokemonProgressionState().reason || 'progression Pokémon intelligente',
+        run: handlePokemonProgression,
       });
     }
 
