@@ -409,7 +409,11 @@ async function handlePokemonProfileProgression() {
   const evolutions = pokemonEvolutionOptions();
   const affordableEvolutions = evolutions.filter(option => option.available);
 
-  if (config.autoEvolvePokemon && affordableEvolutions.length === 1) {
+  if (
+    config.autoEvolvePokemon &&
+    evolutions.length === 1 &&
+    affordableEvolutions.length === 1
+  ) {
     const evolution = affordableEvolutions[0];
     const dialog = document.querySelector('#pokemon-evolution-dialog');
 
@@ -450,7 +454,7 @@ async function handlePokemonProfileProgression() {
     }
   }
 
-  if (config.autoEvolvePokemon && affordableEvolutions.length > 1) {
+  if (config.autoEvolvePokemon && evolutions.length > 1) {
     markPokemonScanned(context.id, {
       phase: 'manual',
       targetId: context.id,
