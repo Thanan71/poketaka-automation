@@ -2,7 +2,7 @@
 (() => {
   'use strict';
 
-  const VERSION = "0.9.8";
+  const VERSION = "0.9.9";
 
 // ---- src/core/config.js ----
 const STORAGE_KEY = 'poketaka-automation:config';
@@ -700,6 +700,7 @@ function directActionKind(urlLike) {
   const path = url.pathname;
   const routes = [
     ['capture', /^\/expeditions\/encounters\/[^/]+\/capture\/?$/],
+    ['expedition_claim', /^\/expeditions\/results\/[^/]+\/claim\/?$/],
     ['expedition_launch', /^\/expeditions\/[^/]+\/launch\/?$/],
     ['gym_challenge', /^\/gyms\/[^/]+\/challenge\/?$/],
     ['pokemon_level_up', /^\/collection\/[^/]+\/level-up\/?$/],
@@ -4176,6 +4177,24 @@ async function captureEncounter() {
 // ---- src/features/expeditions/cycle.js ----
 async function claimExpedition() {
     if (!config.autoClaimExpeditions) return false;
+
+    const form = document.querySelector(
+      'form[method="POST"][action*="/expeditions/results/"][action$="/claim"]'
+    );
+
+    if (form && config.directHttpActions) {
+      setExpeditionPhase('claiming');
+      return submitObservedForm(
+        form,
+        'Récupération HTTP des récompenses',
+        {
+          expectedKind: 'expedition_claim',
+          navigate: false,
+          moduleId: 'expeditions',
+        }
+      );
+    }
+
     const button = findClickable([
       'recuperer les recompenses',
       'recuperer récompenses',
@@ -5211,6 +5230,119 @@ function detachedLeagueInfo(root) {
   };
 }
 
+function expeditionPendingResultCount(root) {
+  const badge = [...root.querySelectorAll('a[href*="/expeditions"] .app-nav-item__badge, .app-nav-item[href*="/expeditions"] .app-nav-item__badge')]
+    .find(node => /expedition terminee|expeditions terminees|resultat|a recuperer/.test(
+      normalizeText(node.getAttribute('aria-label') || node.textContent || '')
+    ));
+
+  if (!badge) return 0;
+  const value = parseNumber(
+    badge.getAttribute('aria-label') || badge.textContent || ''
+  );
+  return Number(value || 0);
+}
+
+function detachedResultCandidates(root) {
+  const seen = new Set();
+  return [...root.querySelectorAll('a[href*="/expeditions/results/"]')]
+    .map(anchor => {
+      try {
+        const url = new URL(anchor.getAttribute('href') || anchor.href, location.href);
+        if (url.origin !== location.origin) return null;
+        if (seen.has(url.href)) return null;
+        seen.add(url.href);
+
+        const container = anchor.closest(
+          '.mission-slot-card, .mission-card, article, section, li'
+        );
+        return {
+          resultUrl: url.href,
+          title:
+            container?.querySelector('h2, h3, strong')?.textContent?.trim() ||
+            anchor.textContent?.trim() ||
+            'Expédition terminée',
+        };
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean);
+}
+
+async function findPendingExpeditionResult(indexPage) {
+  const previous = expeditionCycle();
+  const candidates = detachedResultCandidates(indexPage.doc);
+
+  if (isExpeditionResultPage()) {
+    candidates.unshift({
+      title:
+        document.querySelector('.page-header h1, main h1')?.textContent?.trim() ||
+        previous.title ||
+        'Expédition terminée',
+      resultUrl: location.href,
+    });
+  }
+
+  if (
+    previous.resultUrl &&
+    ['due', 'opening_result', 'result', 'claiming', 'awaiting_capture'].includes(previous.phase)
+  ) {
+    candidates.unshift({
+      resultUrl: previous.resultUrl,
+      title: previous.title || 'Expédition terminée',
+    });
+  }
+
+  const unique = [];
+  const seen = new Set();
+  for (const candidate of candidates) {
+    if (!candidate?.resultUrl || seen.has(candidate.resultUrl)) continue;
+    seen.add(candidate.resultUrl);
+    unique.push(candidate);
+  }
+
+  for (const candidate of unique.slice(0, 4)) {
+    const page = await fetchObservedPage(candidate.resultUrl, {
+      cacheMs: 0,
+      force: true,
+    });
+    if (!page) continue;
+
+    const hasPendingCapture = Boolean(page.doc.querySelector('form[data-capture-form]'));
+    const hasClaim = Boolean(expeditionRewardClaimForm(page.doc));
+    const headerStatus = normalizeText(
+      page.doc.querySelector('.page-header__actions .status-badge')?.textContent || ''
+    );
+
+    if (
+      hasPendingCapture ||
+      hasClaim ||
+      /a recuperer|capture|decision requise/.test(headerStatus)
+    ) {
+      return {
+        title:
+          page.doc.querySelector('.page-header h1, main h1')?.textContent?.trim() ||
+          candidate.title,
+        resultUrl: page.url,
+        dueAt: null,
+        status: 'pending_result',
+      };
+    }
+  }
+
+  if (expeditionPendingResultCount(indexPage.doc) > 0) {
+    return {
+      title: previous.title || 'Expédition terminée',
+      resultUrl: previous.resultUrl || null,
+      dueAt: null,
+      status: 'pending_result_unknown_url',
+    };
+  }
+
+  return null;
+}
+
 async function backgroundObserveExpeditions({ force = false } = {}) {
   const page = await fetchObservedPage('/expeditions', {
     cacheMs: force ? 0 : 5000,
@@ -5270,13 +5402,42 @@ async function backgroundObserveExpeditions({ force = false } = {}) {
     return { acted: false, page, active };
   }
 
+  const pendingResult = await findPendingExpeditionResult(page);
+
+  if (pendingResult) {
+    setExpeditionPhase('due', {
+      title: pendingResult.title,
+      resultUrl: pendingResult.resultUrl,
+      dueAt: null,
+    });
+
+    appendActionLog(
+      pendingResult.resultUrl ? 'info' : 'warning',
+      'expedition',
+      pendingResult.resultUrl
+        ? `Résultat à récupérer détecté: ${pendingResult.title}`
+        : 'Résultat terminé détecté mais URL de bilan introuvable',
+      {
+        resultUrl: pendingResult.resultUrl,
+        status: pendingResult.status,
+      }
+    );
+
+    return {
+      acted: false,
+      page,
+      active: pendingResult,
+      pendingResult: true,
+    };
+  }
+
   setExpeditionPhase('ready_to_start', {
     title: null,
     resultUrl: null,
     dueAt: null,
   });
 
-  return { acted: false, page, active: null };
+  return { acted: false, page, active: null, pendingResult: false };
 }
 
 function detachedCaptureDecision(root) {
@@ -5390,6 +5551,61 @@ function recordDetachedExpeditionOutcome(root, pathname) {
   saveState(state);
 }
 
+function expeditionRewardClaimForm(root) {
+  return root.querySelector(
+    'form[method="POST"][action*="/expeditions/results/"][action$="/claim"]'
+  );
+}
+
+function expeditionRewardsRecovered(root) {
+  const claimForm = expeditionRewardClaimForm(root);
+  if (claimForm) return false;
+
+  const metas = [...root.querySelectorAll('.mission-rewards .mission-reward__meta')]
+    .map(node => normalizeText(node.textContent || ''))
+    .filter(Boolean);
+
+  if (!metas.length) {
+    return Boolean(root.querySelector('.result-claimed'));
+  }
+
+  return metas.every(meta =>
+    !/a recuperer|to claim|claimable|pending/.test(meta)
+  );
+}
+
+async function verifyBackgroundExpeditionClaim(resultUrl) {
+  const page = await fetchObservedPage(resultUrl, {
+    cacheMs: 0,
+    force: true,
+  });
+  if (!page) return false;
+
+  const redirectedToIndex = /^\/expeditions\/?$/.test(page.pathname);
+  const recovered = redirectedToIndex || expeditionRewardsRecovered(page.doc);
+
+  if (recovered) {
+    appendActionLog(
+      'success',
+      'expedition',
+      'Récompenses d’expédition confirmées',
+      {
+        resultUrl: page.pathname,
+        verification: redirectedToIndex ? 'redirected_to_index' : 'result_marked_recovered',
+      }
+    );
+    return true;
+  }
+
+  appendActionLog(
+    'warning',
+    'expedition',
+    'Récompenses toujours en attente après le POST',
+    { resultUrl: page.pathname }
+  );
+  return false;
+}
+
 async function backgroundHandleExpeditionResult(active) {
   if (!active?.resultUrl) return false;
 
@@ -5466,22 +5682,77 @@ async function backgroundHandleExpeditionResult(active) {
     }
   }
 
-  const text = normalizeText(page.doc.body?.textContent || '');
-  const rewardsRecovered =
-    Boolean(page.doc.querySelector('.result-claimed')) ||
-    /recompenses recuperees|recompense recuperee|status badge success.*recuperee/.test(text);
-
-  if (rewardsRecovered) {
+  if (expeditionRewardsRecovered(page.doc)) {
     setExpeditionPhase('ready_to_start', {
       title: null,
       resultUrl: null,
       dueAt: null,
     });
+    appendActionLog(
+      'success',
+      'expedition',
+      `Résultat finalisé: ${active.title}`,
+      'Toutes les récompenses sont déjà récupérées'
+    );
     return false;
   }
 
-  // Contrat serveur inconnu : conserver le fallback visible pour ne pas
-  // inventer une action de récupération.
+  const claimForm = expeditionRewardClaimForm(page.doc);
+
+  if (config.autoClaimExpeditions && claimForm) {
+    setExpeditionPhase('claiming', {
+      title: active.title,
+      resultUrl: active.resultUrl,
+      dueAt: active.dueAt,
+    });
+
+    appendActionLog(
+      'info',
+      'expedition',
+      `Récupération des récompenses: ${active.title}`,
+      { endpoint: claimForm.getAttribute('action') || claimForm.action }
+    );
+
+    const claimed = await submitObservedForm(
+      claimForm,
+      `Récompenses arrière-plan: ${active.title}`,
+      {
+        expectedKind: 'expedition_claim',
+        navigate: false,
+        moduleId: 'expeditions',
+      }
+    );
+
+    if (!claimed) {
+      setExpeditionPhase('due', {
+        title: active.title,
+        resultUrl: active.resultUrl,
+        dueAt: active.dueAt,
+      });
+      return false;
+    }
+
+    const verified = await verifyBackgroundExpeditionClaim(active.resultUrl);
+    if (verified) {
+      setExpeditionPhase('ready_to_start', {
+        title: null,
+        resultUrl: null,
+        dueAt: null,
+      });
+      return true;
+    }
+
+    setExpeditionPhase('claiming', {
+      title: active.title,
+      resultUrl: active.resultUrl,
+      dueAt: active.dueAt,
+    });
+    return true;
+  }
+
+  // Tant que le formulaire de récupération existe, ne jamais considérer le
+  // résultat comme terminé. Le fallback visible reste disponible si l'auto
+  // claim est désactivé ou si le contrat change.
   setExpeditionPhase('due', {
     title: active.title,
     resultUrl: active.resultUrl,
