@@ -345,7 +345,7 @@ function preparationTeamPlan(requirement) {
   const plan = chooseTeamForMission(roster, context);
 
   state.expeditionPlan = {
-    title: context.title,
+    title: expeditionCycle().title || context.title,
     team: plan.team.map(pokemon => pokemon.name),
     teamIds: plan.team.map(pokemon => pokemon.id),
     teamScore: plan.teamScore,
