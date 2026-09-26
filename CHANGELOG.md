@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.9.5 - 2026-09-26
+
+- Correction d'un état `expeditionPlan` périmé en mode GET silencieux.
+- Le plan d'expédition est maintenant réécrit à chaque préparation d'expédition arrière-plan avec la mission, l'équipe, le score et la viabilité réellement calculés.
+- Lorsqu'une expédition active observée ne correspond pas au plan mémorisé, le plan stale est remplacé par l'expédition réellement en cours.
+- Le fallback "équipe bloquée → progression Pokémon" ne peut donc plus s'appuyer sur une ancienne mission ou une ancienne viabilité.
+- Le panel ne doit plus afficher un ancien plan d'expédition pendant qu'une autre mission est réellement en cours.
+- Ajout d'un test CI dédié à la synchronisation du plan d'expédition arrière-plan.
+
+
 ## 0.9.4 - 2026-09-26
 
 - Correction d'un blocage où la progression Pokémon pouvait retarder le lancement de l'expédition suivante.
