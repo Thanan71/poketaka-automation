@@ -359,3 +359,16 @@ Le flux est :
 `GET /expeditions → GET /prepare → calcul équipe → POST /launch → GET /expeditions de vérification`
 
 Si le premier POST ne crée pas d'expédition vérifiable, le bot recharge une fois le formulaire de préparation et effectue une seule deuxième tentative avec les nouveaux tokens serveur. Le fallback visible reste réservé aux situations réellement non automatisables, comme certaines décisions manuelles.
+
+
+### Récupération des récompenses d'expédition
+
+La résolution silencieuse d'une expédition respecte maintenant cet ordre strict :
+
+`résultat → capture éventuelle → POST /claim → vérification serveur → nouvelle expédition`
+
+Le bot ne considère jamais un résultat comme terminé tant que le formulaire **Récupérer les récompenses** existe ou qu'une récompense est encore marquée **À récupérer**.
+
+Après le POST claim, un GET forcé du bilan confirme l'opération. Si PokéTaka redirige le bilan vers `/expeditions`, cette redirection est aussi considérée comme une confirmation valide.
+
+Si le résultat est détecté mais que son URL ne peut pas être retrouvée, l'automatisation bloque volontairement la relance au lieu de perdre les récompenses.
