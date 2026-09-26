@@ -480,6 +480,7 @@ function goalCandidatePriorityBonus(candidateName) {
     heal: 'healing',
     gym: 'progression',
     progression: 'progression',
+    'pokemon-progression': 'pokemon',
     incubator: 'incubator',
     breeding: 'breeding',
     'greenhouse-harvest': 'greenhouse',
