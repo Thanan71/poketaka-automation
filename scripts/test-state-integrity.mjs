@@ -38,11 +38,13 @@ const catalogApi = new Function(
   'isVisible',
   'findClickable',
   'elementText',
+  'document',
   `${catalogSource}\nreturn { expeditionPrepareLink, expeditionCards };`
 )(
   () => false,
   () => null,
-  el => normalizeText(el?.textContent || '')
+  el => normalizeText(el?.textContent || ''),
+  null
 );
 
 const detachedCatalogHtml = `
