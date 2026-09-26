@@ -694,13 +694,18 @@ function backgroundEvolutionCandyGoal(evolutions) {
   };
 }
 
-async function backgroundHandlePokemonProgression() {
+async function backgroundHandlePokemonProgression({ allowExpeditionFallback = false } = {}) {
   if (!config.autoLevelPokemon && !config.autoEvolvePokemon) return false;
-  if (expeditionCycle().phase === 'running') {
+  if (
+    !allowExpeditionFallback &&
+    expeditionHasPriorityOverPokemonProgression()
+  ) {
     setPokemonProgression({
       phase: 'waiting_expedition',
       action: 'wait',
-      reason: `Attente de la fin de ${expeditionCycle().title || 'l’expédition'} avant d’investir des ressources`,
+      reason: expeditionCycle().phase === 'running'
+        ? `Attente de la fin de ${expeditionCycle().title || 'l’expédition'} avant d’investir des ressources`
+        : 'Priorité au prochain cycle d’expédition avant tout investissement Pokémon',
     });
     return false;
   }
@@ -798,7 +803,18 @@ async function backgroundHandlePokemonProgression() {
         }
       );
 
-      if (submitted) return true;
+      if (submitted) {
+        markPokemonScanned(context.id, {
+          phase: 'scanned',
+          targetId: context.id,
+          targetName: context.name,
+          targetLevel: context.level,
+          action: 'evolve_done',
+          reason: `Évolution effectuée vers ${evolution.target || 'la forme suivante'} · priorité rendue aux expéditions`,
+          lastEvolutionAt: now(),
+        });
+        return true;
+      }
       continue;
     }
 
@@ -842,7 +858,18 @@ async function backgroundHandlePokemonProgression() {
         }
       );
 
-      if (submitted) return true;
+      if (submitted) {
+        markPokemonScanned(context.id, {
+          phase: 'scanned',
+          targetId: context.id,
+          targetName: context.name,
+          targetLevel: level.targetLevel,
+          action: 'level_up_done',
+          reason: `Renforcement vers le niveau ${level.targetLevel} effectué · priorité rendue aux expéditions`,
+          lastUpgradeAt: now(),
+        });
+        return true;
+      }
       continue;
     }
 
@@ -925,8 +952,17 @@ async function runBackgroundAutomation() {
     if (gymAction) return true;
   }
 
-  if (pokemonProgressionScanDue()) {
-    const pokemonAction = await backgroundHandlePokemonProgression();
+  const expeditionNeedsTeamHelp =
+    !expeditionObservation.active &&
+    state.expeditionPlan?.viability === 'blocked';
+
+  if (
+    expeditionNeedsTeamHelp &&
+    pokemonProgressionScanDue({ allowExpeditionFallback: true })
+  ) {
+    const pokemonAction = await backgroundHandlePokemonProgression({
+      allowExpeditionFallback: true,
+    });
     if (pokemonAction) return true;
   }
 
