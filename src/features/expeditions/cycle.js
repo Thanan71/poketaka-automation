@@ -1,5 +1,23 @@
 async function claimExpedition() {
     if (!config.autoClaimExpeditions) return false;
+
+    const form = document.querySelector(
+      'form[method="POST"][action*="/expeditions/results/"][action$="/claim"]'
+    );
+
+    if (form && config.directHttpActions) {
+      setExpeditionPhase('claiming');
+      return submitObservedForm(
+        form,
+        'Récupération HTTP des récompenses',
+        {
+          expectedKind: 'expedition_claim',
+          navigate: false,
+          moduleId: 'expeditions',
+        }
+      );
+    }
+
     const button = findClickable([
       'recuperer les recompenses',
       'recuperer récompenses',
