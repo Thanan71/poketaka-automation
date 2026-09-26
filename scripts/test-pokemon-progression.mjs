@@ -149,6 +149,30 @@ assert(
   'background Pokémon progression must only be a fallback after a blocked team plan'
 );
 
+const targetAttempt = backgroundSource.indexOf(
+  "const expeditionAction = await backgroundStartExpedition(expeditionObservation.page);"
+);
+const blockedProgression = backgroundSource.indexOf(
+  "Mission cible bloquée — tentative de renforcement avant mission de repli"
+);
+const opportunisticFallback = backgroundSource.indexOf(
+  "// Entretien opportuniste, sans navigation visible. À ce stade"
+);
+
+assert(
+  targetAttempt >= 0 &&
+  blockedProgression > targetAttempt &&
+  opportunisticFallback > blockedProgression,
+  'blocked target progression must run before an easier opportunistic expedition fallback'
+);
+
+assert(
+  backgroundSource.includes("Mission écartée: ${selected.title}") &&
+  backgroundSource.includes("recommendedLevel: assessment.context?.recommendedLevel") &&
+  backgroundSource.includes("topCandidates: assessment.plan.ranked.slice(0, 5)"),
+  'blocked expedition logs must expose the exact team viability diagnosis'
+);
+
 assert(
   navigationSource.includes("expeditionHasPriorityOverPokemonProgression()") &&
   navigationSource.includes("pokemonFallbackNeeded"),
@@ -160,3 +184,5 @@ console.log('Expedition relaunch priority: OK');
 console.log('Numeric level/resource parsing: OK');
 console.log('One-upgrade-per-scan rule: OK');
 console.log('Planned-team resource targeting: OK');
+console.log('Blocked target progression before expedition fallback: OK');
+console.log('Blocked expedition diagnostic logging: OK');
