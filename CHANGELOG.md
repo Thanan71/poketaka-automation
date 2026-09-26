@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.9.7 - 2026-09-26
+
+- Correction de la redirection visible vers la page Expéditions lors d'un relancement alors que le mode GET silencieux est actif.
+- Le candidat d'expédition visible ne peut plus passer devant le coordinateur arrière-plan simplement à cause du bonus du Goal Planner.
+- Les phases `ready_to_start`, `preparing` et `starting` déclenchent immédiatement le moteur arrière-plan sans attendre l'intervalle normal de rafraîchissement GET.
+- Après résolution d'une expédition, un nouveau GET `/expeditions` est effectué dans le même cycle afin de réutiliser immédiatement l'emplacement libéré.
+- Après chaque POST `/launch`, le bot vérifie silencieusement via GET que l'expédition est réellement active.
+- Si le premier POST n'est pas confirmé, le formulaire de préparation est rechargé pour obtenir un état/tokens frais et une seule seconde tentative silencieuse est effectuée.
+- En cas d'échec après deux tentatives, le bot revient à `ready_to_start` et journalise précisément la raison au lieu de rediriger immédiatement.
+- Ajout d'une vue `Logs` dédiée dans le panel, à côté de `Pilotage`.
+- Le journal persiste jusqu'à 120 entrées et affiche heure, catégorie, message et détails.
+- Journalisation des POST HTTP, erreurs GET, navigations fallback, clics DOM, transitions d'expédition et décisions réellement exécutées par l'orchestrateur.
+- Ajout d'un bouton `Vider` pour effacer le journal.
+- Réduction du bruit : les cycles sans action et les transitions inchangées ne créent plus d'entrée de log.
+- Ajout de tests CI pour la suppression de la redirection visible, la vérification/retry du lancement silencieux et la page Logs.
+
+
 ## 0.9.6 - 2026-09-26
 
 - Correction de `selectedExpedition` qui pouvait rester sur une ancienne mission pendant qu'une autre expédition était réellement active.
