@@ -4,7 +4,8 @@
   "private": true,
   "description": "Tampermonkey automation assistant for poketaka.fr",
   "scripts": {
-    "check": "node --check poketaka.user.js && node --check src/poketaka.user.js"
+    "build": "node scripts/build.mjs",
+    "check": "npm run build && node --check dist/runtime.js && node --check dist/poketaka.user.js"
   },
   "engines": {
     "node": ">=20"
