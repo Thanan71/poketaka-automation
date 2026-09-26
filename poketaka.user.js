@@ -386,31 +386,189 @@
 
     const min = Number(form.getAttribute('data-team-min') || 1);
     const max = Number(form.getAttribute('data-team-max') || min);
-    const selected = [...form.querySelectorAll('[data-team-select]')]
-      .filter(select => select.value)
-      .length;
+    const selectedIds = [...form.querySelectorAll('[data-team-select]')]
+      .map(select => select.value)
+      .filter(Boolean);
 
-    return { form, min, max, selected };
+    return { form, min, max, selected: selectedIds.length, selectedIds };
   }
 
-  function selectFirstAvailablePokemon(requirement) {
-    if (!requirement?.form) return false;
+  function canonicalType(value) {
+    const type = normalizeText(value);
+    const aliases = {
+      fire: 'feu', water: 'eau', grass: 'plante', electric: 'electrik',
+      ice: 'glace', fighting: 'combat', ground: 'sol', flying: 'vol',
+      psychic: 'psy', bug: 'insecte', rock: 'roche', ghost: 'spectre',
+      dark: 'tenebres', steel: 'acier', fairy: 'fee',
+    };
+    return aliases[type] || type;
+  }
 
-    const selects = [...requirement.form.querySelectorAll('select[data-team-select]')];
-    for (const select of selects) {
-      if (select.value) continue;
-      const option = [...select.options].find(item => !item.disabled && item.value);
-      if (!option) continue;
+  function typeMultiplier(attacker, defender) {
+    const atk = canonicalType(attacker);
+    const def = canonicalType(defender);
+    return TYPE_CHART[atk]?.[def] ?? 1;
+  }
 
-      select.value = option.value;
-      select.dispatchEvent(new Event('input', { bubbles: true }));
-      select.dispatchEvent(new Event('change', { bubbles: true }));
-      return true;
+  function expeditionPreparationContext(requirement) {
+    const root = requirement?.form?.closest('main') || document;
+    const facts = {};
+
+    root.querySelectorAll('.expedition-prep-facts > div').forEach(row => {
+      const key = normalizeText(row.querySelector('dt')?.textContent || '');
+      const value = normalizeText(row.querySelector('dd')?.textContent || '');
+      if (key) facts[key] = value;
+    });
+
+    const typeText = facts['types principaux'] || facts.types || '';
+    const missionTypes = typeText
+      .split(/[,/]/)
+      .map(canonicalType)
+      .filter(Boolean);
+
+    const recommendedLevel = parseNumber(
+      (facts['niveau conseille'] || facts['niveau recommandé'] || '').match(/\d+(?:[.,]\d+)?/)?.[0]
+    );
+
+    return {
+      title: normalizeText(root.querySelector('.page-header h1, h1')?.textContent || ''),
+      missionTypes,
+      recommendedLevel,
+      durationMinutes: parseDurationMinutes(facts.duree || facts.duration || ''),
+    };
+  }
+
+  function pokemonFromCard(card) {
+    const hp = parseNumber(card.getAttribute('data-pokemon-hp')) || 0;
+    const hpMax = parseNumber(card.getAttribute('data-pokemon-hp-max')) || hp || 1;
+    return {
+      card,
+      id: card.getAttribute('data-pokemon-id') || '',
+      name: card.getAttribute('data-pokemon-name') || normalizeText(card.textContent || ''),
+      level: parseNumber(card.getAttribute('data-pokemon-level')) || 0,
+      hp,
+      hpMax,
+      hpPercent: hpMax > 0 ? (hp / hpMax) * 100 : 0,
+      types: (card.getAttribute('data-pokemon-types') || '')
+        .split(/[\s,;/]+/)
+        .map(canonicalType)
+        .filter(Boolean),
+      favorite: card.getAttribute('data-pokemon-favorite') === '1',
+      heldItem: Boolean(card.getAttribute('data-pokemon-held-item')),
+    };
+  }
+
+  function pokemonMatchupScore(pokemon, context) {
+    if (!context.missionTypes.length || !pokemon.types.length) return 0;
+
+    const multipliers = context.missionTypes.map(defender =>
+      Math.max(...pokemon.types.map(attacker => typeMultiplier(attacker, defender)))
+    );
+
+    return multipliers.reduce((sum, value) => {
+      if (value >= 2) return sum + 45;
+      if (value > 1) return sum + 20;
+      if (value === 0) return sum - 80;
+      if (value < 1) return sum - 25;
+      return sum;
+    }, 0);
+  }
+
+  function rankAvailablePokemon(requirement) {
+    if (!requirement?.form) return [];
+
+    const context = expeditionPreparationContext(requirement);
+    const selected = new Set(requirement.selectedIds || []);
+
+    const ranking = [...requirement.form.querySelectorAll('[data-team-pokemon][data-pokemon-id]')]
+      .map(pokemonFromCard)
+      .filter(pokemon => pokemon.id && !selected.has(pokemon.id))
+      .map(pokemon => {
+        let score = pokemon.level * 12;
+        const reasons = [`niveau ${pokemon.level}`];
+
+        score += pokemon.hpPercent * 0.55;
+        reasons.push(`PV ${Math.round(pokemon.hpPercent)}%`);
+
+        if (pokemon.hpPercent < config.minTeamHpPercent) {
+          score -= 1000;
+          reasons.push(`PV sous ${config.minTeamHpPercent}%`);
+        }
+
+        if (context.recommendedLevel != null) {
+          const delta = pokemon.level - context.recommendedLevel;
+          if (delta >= 0) {
+            const bonus = Math.min(80, 25 + delta * 8);
+            score += bonus;
+            reasons.push(`+${bonus} niveau adapté`);
+          } else {
+            const penalty = Math.min(500, Math.abs(delta) * 65);
+            score -= penalty;
+            reasons.push(`-${penalty} sous le niveau conseillé`);
+          }
+        }
+
+        const matchup = pokemonMatchupScore(pokemon, context);
+        score += matchup;
+        if (matchup) reasons.push(`${matchup > 0 ? '+' : ''}${matchup} types`);
+
+        if (pokemon.favorite) score += 5;
+        if (pokemon.heldItem) score += 8;
+
+        return {
+          ...pokemon,
+          score: Math.round(score),
+          reasons,
+          missionTypes: context.missionTypes,
+          recommendedLevel: context.recommendedLevel,
+        };
+      })
+      .sort((a, b) => b.score - a.score);
+
+    if (config.debug && ranking.length) {
+      console.table(ranking.map(item => ({
+        pokemon: item.name,
+        score: item.score,
+        niveau: item.level,
+        pv: Math.round(item.hpPercent) + '%',
+        types: item.types.join(', '),
+        mission: item.missionTypes.join(', '),
+      })));
     }
 
-    const card = requirement.form.querySelector('[data-team-pokemon][data-pokemon-id]');
-    if (card && isVisible(card)) {
-      card.click();
+    return ranking;
+  }
+
+  async function selectSmartPokemon(requirement) {
+    const ranking = rankAvailablePokemon(requirement);
+    const best = ranking.find(item => item.hpPercent >= config.minTeamHpPercent);
+    if (!best) return false;
+
+    state.smartTeam = {
+      lastSelection: [...(state.smartTeam?.lastSelection || []), best.name],
+      lastMissionTypes: best.missionTypes,
+      lastRecommendedLevel: best.recommendedLevel,
+    };
+    saveState(state);
+
+    if (isVisible(best.card)) {
+      return clickElement(
+        best.card,
+        `Équipe intelligente: ${best.name} (score ${best.score})`
+      );
+    }
+
+    const select = [...requirement.form.querySelectorAll('select[data-team-select]')]
+      .find(input => !input.value && [...input.options].some(option => option.value === best.id));
+
+    if (select) {
+      select.value = best.id;
+      select.dispatchEvent(new Event('input', { bubbles: true }));
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      state.lastAction = `Équipe intelligente: ${best.name}`;
+      state.lastActionAt = now();
+      saveState(state);
+      updatePanel();
       return true;
     }
 
@@ -421,10 +579,17 @@
     if (!config.autoStartExpeditions) return false;
 
     const requirement = expeditionTeamRequirement();
+    if (!requirement) return false;
 
-    // La page PokéTaka expose "Dernière équipe utilisée". C'est le chemin
-    // privilégié car il réapplique exactement une composition déjà valide.
-    if (requirement && requirement.selected < requirement.min) {
+    if (requirement.selected < requirement.min) {
+      if (config.smartTeam) {
+        const selected = await selectSmartPokemon(requirement);
+        if (selected) {
+          setExpeditionPhase('preparing');
+          return true;
+        }
+      }
+
       const lastTeamButton = document.querySelector(
         'button[data-last-expedition-team][data-last-team-ids]'
       );
@@ -432,14 +597,6 @@
       if (lastTeamButton && isVisible(lastTeamButton)) {
         setExpeditionPhase('preparing');
         return clickElement(lastTeamButton, 'Application de la dernière équipe');
-      }
-
-      if (selectFirstAvailablePokemon(requirement)) {
-        state.lastAction = 'Pokémon disponible ajouté à l’expédition';
-        state.lastActionAt = now();
-        saveState(state);
-        updatePanel();
-        return true;
       }
 
       state.lastAction = `Préparation bloquée — équipe ${requirement.selected}/${requirement.min}`;
@@ -459,7 +616,7 @@
       'demarrer',
       'start expedition',
       'start',
-    ], document, {
+    ], requirement.form, {
       exclude: ['annuler', 'cancel', 'acheter', 'buy'],
     });
 
