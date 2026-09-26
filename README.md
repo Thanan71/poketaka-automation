@@ -268,3 +268,19 @@ Les données absentes ne sont jamais inventées. Le snapshot conserve `null` lor
 ### Arènes quotidiennes
 
 La v0.9 renforce aussi la protection du combat quotidien : dès qu'un défi a été soumis, aucune deuxième tentative automatique n'est autorisée le même jour. Une page de résultat confirme définitivement le combat comme consommé jusqu'au lendemain.
+
+
+## Progression Pokémon automatique
+
+Le bot peut maintenant renforcer et faire évoluer les Pokémon de manière prudente.
+
+- Il attend la fin d'une expédition active avant d'investir des ressources.
+- Si un plan d'équipe existe, seuls les Pokémon utiles à ce plan sont considérés.
+- Un renforcement automatique ne gagne qu'un niveau par action.
+- Une réserve de Poussière Étoile est conservée (500 par défaut).
+- Les Bonbons sont réservés lorsqu'une évolution unique est en attente et qu'il ne manque que ces Bonbons.
+- Une évolution n'est automatique que lorsqu'il existe un seul chemin d'évolution et que toutes les conditions visibles sont remplies.
+- Les évolutions à plusieurs branches restent manuelles.
+- Un Pokémon déjà engagé dans une activité est ignoré.
+
+Les réglages sont accessibles dans la section **Progression Pokémon** du panel.
