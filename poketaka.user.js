@@ -1579,6 +1579,23 @@
 
   GM_registerMenuCommand('Activer / désactiver PokéTaka Automation', () => setEnabled(!config.enabled));
   GM_registerMenuCommand('Exécuter un cycle maintenant', () => cycle());
+  GM_registerMenuCommand('Diagnostiquer le timer de la page', () => {
+    const current = moduleFromLocation();
+    if (!current) {
+      console.info('[PokéTaka Auto] Aucun module reconnu sur cette page.');
+      return;
+    }
+
+    const timerInfo = findModuleCountdown(current);
+    const status = state.moduleStatus?.[current.id] || {};
+    console.group(`[PokéTaka Auto] Diagnostic timer — ${current.label}`);
+    console.log('Module:', current);
+    console.log('Timer détecté:', timerInfo || 'aucun');
+    console.log('État mémorisé:', status);
+    console.log('Échéance affichée:', status.nextDueAt ? formatRemaining(status.nextDueAt) : 'aucune');
+    console.groupEnd();
+  });
+
   GM_registerMenuCommand('Afficher le classement des expéditions', () => {
     const ranking = rankExpeditions();
     if (!ranking.length) {
