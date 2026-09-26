@@ -237,25 +237,39 @@ function pokemonProgressionPriorityRecords(records) {
     (gymCycle().selectedTeam || []).map(normalizeText)
   );
   const recommendedLevel = Number(state.smartTeam?.lastRecommendedLevel || 0);
+  const hasPlannedTargets =
+    expeditionIds.size > 0 ||
+    expeditionNames.size > 0 ||
+    gymNames.size > 0;
 
   return records
     .map(record => {
       let priority = 0;
       const normalizedName = normalizeText(record.name);
+      const planned =
+        expeditionIds.has(record.id) ||
+        expeditionNames.has(normalizedName) ||
+        gymNames.has(normalizedName);
 
       if (expeditionIds.has(record.id)) priority += 1200;
       if (expeditionNames.has(normalizedName)) priority += 900;
       if (gymNames.has(normalizedName)) priority += 850;
-      if (record.favorite) priority += 220;
 
-      if (recommendedLevel > 0 && record.level < recommendedLevel) {
+      // Lorsqu'un objectif d'équipe existe, on refuse d'investir dans un
+      // Pokémon secondaire simplement parce que la cible utile est occupée.
+      if (hasPlannedTargets && !planned) priority -= 10000;
+
+      if (!hasPlannedTargets && record.favorite) priority += 220;
+
+      if (planned && recommendedLevel > 0 && record.level < recommendedLevel) {
         priority += 400 + (recommendedLevel - record.level) * 45;
       }
 
       priority += Math.min(250, record.level * 12);
 
-      return { ...record, priority };
+      return { ...record, priority, planned };
     })
+    .filter(record => !hasPlannedTargets || record.planned)
     .sort((a, b) => b.priority - a.priority || b.level - a.level);
 }
 
@@ -278,6 +292,12 @@ function pokemonProgressionScanDue() {
 
   const progress = pokemonProgressionState();
   if (progress.blockedUntil && progress.blockedUntil > now()) return false;
+
+  // Une expédition active utilise généralement les Pokémon les plus utiles.
+  // On attend son retour au lieu de renforcer des remplaçants moins pertinents.
+  if (expeditionCycle().phase === 'running') {
+    return false;
+  }
 
   const goal = currentGoalPlan();
   const teamBlocked =
@@ -508,6 +528,15 @@ async function handlePokemonProfileProgression() {
 
 async function handlePokemonProgression() {
   if (!config.autoLevelPokemon && !config.autoEvolvePokemon) return false;
+
+  if (expeditionCycle().phase === 'running') {
+    setPokemonProgression({
+      phase: 'waiting_expedition',
+      action: 'wait',
+      reason: `Attente de la fin de ${expeditionCycle().title || 'l’expédition'} avant d’investir des ressources`,
+    });
+    return false;
+  }
 
   if (isPokemonProfilePage()) {
     return handlePokemonProfileProgression();
