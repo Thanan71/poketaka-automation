@@ -87,7 +87,7 @@ function directRequestErrorFromHtml(html) {
   try {
     const doc = new DOMParser().parseFromString(html, 'text/html');
     const error = doc.querySelector(
-      '.error-summary, [role="alert"].context-alert, .gameplay-action-unavailable'
+      '.error-summary, [role="alert"].context-alert, .field-error[role="alert"]'
     );
     const text = error?.textContent?.replace(/\s+/g, ' ').trim();
     return text || null;
