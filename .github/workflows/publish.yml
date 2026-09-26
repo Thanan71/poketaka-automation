@@ -1,0 +1,80 @@
+name: Publish Tampermonkey
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+concurrency:
+  group: poketaka-tampermonkey-release
+  cancel-in-progress: true
+
+jobs:
+  release:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Compute X.X.X version
+        id: version
+        run: |
+          VERSION="$(node scripts/next-version.mjs)"
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+          echo "Publishing PokéTaka Automation ${VERSION}"
+
+      - name: Update package version
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+          pkg.version = process.env.VERSION;
+          fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+          NODE
+
+      - name: Build runtime and loader
+        env:
+          PTA_VERSION: ${{ steps.version.outputs.version }}
+        run: npm run build
+
+      - name: Publish generated loader at repository root
+        run: cp dist/poketaka.user.js poketaka.user.js
+
+      - name: Validate generated distribution
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          node --check dist/runtime.js
+          node --check dist/poketaka.user.js
+          node --check poketaka.user.js
+          grep -F "@version      ${VERSION}" poketaka.user.js
+          grep -F "const VERSION = \"${VERSION}\"" dist/runtime.js
+          test "$(node -p "require('./package.json').version")" = "${VERSION}"
+
+      - name: Commit generated release
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json poketaka.user.js dist/runtime.js dist/poketaka.user.js dist/version.json
+          if git diff --cached --quiet; then
+            echo "Nothing to publish."
+            exit 0
+          fi
+          git commit -m "chore(release): Tampermonkey v${VERSION} [skip ci]"
+          git push
