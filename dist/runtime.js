@@ -2,7 +2,7 @@
 (() => {
   'use strict';
 
-  const VERSION = "0.9.11";
+  const VERSION = "0.9.12";
 
 // ---- src/core/config.js ----
 const STORAGE_KEY = 'poketaka-automation:config';
@@ -6556,9 +6556,24 @@ async function runBackgroundAutomation() {
     const resultAction = await backgroundHandleExpeditionResult(
       expeditionObservation.active
     );
-    if (resultAction) return true;
+
+    // Un claim confirmé libère le slot : ne pas quitter le cycle ici.
+    // Recharger immédiatement /expeditions permet de relancer une mission
+    // dans le même passage de l'orchestrateur. Les autres actions de résultat
+    // (capture encore en cours, intervention manuelle, etc.) restent terminales.
+    if (
+      resultAction &&
+      expeditionCycle().phase !== 'ready_to_start'
+    ) {
+      return true;
+    }
 
     if (expeditionCycle().phase === 'ready_to_start') {
+      appendActionLog(
+        'info',
+        'expedition',
+        'Slot libéré après résultat — recherche immédiate d’une nouvelle expédition'
+      );
       expeditionObservation = await backgroundObserveExpeditions({
         force: true,
       });
@@ -8427,7 +8442,10 @@ GM_addStyle(`
       liveCapture = null;
     }
 
-    if (liveCapture) {
+    if (
+      liveCapture &&
+      (liveCapture.captureButton || liveCapture.form || liveCapture.skipButton)
+    ) {
       const captureDecision = decideCapture(liveCapture);
       const meta = captureActionMeta(captureDecision.action);
       const title = captureDecision.action === 'capture'
@@ -8542,7 +8560,10 @@ GM_addStyle(`
       }
     }
 
-    if (context) {
+    if (
+      context &&
+      (context.captureButton || context.form || context.skipButton)
+    ) {
       const decision = decideCapture(context);
       return {
         active: true,
