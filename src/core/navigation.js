@@ -443,6 +443,15 @@ function moduleEnabled(moduleId) {
           reasons.push('équipe détectée KO/blessée');
         }
 
+        if (
+          module.id === 'healing' &&
+          config.autoGyms &&
+          gymCycle().needsHealing
+        ) {
+          score += 1250;
+          reasons.push('soins nécessaires avant le combat d’arène');
+        }
+
         if (module.id === 'progression' && config.autoGyms && leagueNeedsDailyCheck()) {
           const gymReason = leagueAttentionReason();
           const knownAvailable = gymCycle().availableToday === true;
