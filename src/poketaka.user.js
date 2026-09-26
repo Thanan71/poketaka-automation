@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PokéTaka Automation
 // @namespace    https://github.com/Thanan71/poketaka-automation
-// @version      0.3.0
+// @version      0.3.1
 // @description  Assistant d'automatisation DOM pour PokéTaka : expéditions, récompenses, soins, serre et progression.
 // @author       Thanan71
 // @match        https://poketaka.fr/*
@@ -16,7 +16,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.3.0';
+  const VERSION = '0.3.1';
   const STORAGE_KEY = 'poketaka-automation:config';
   const STATE_KEY = 'poketaka-automation:state';
 
@@ -1251,6 +1251,11 @@
     const panel = document.getElementById('pta-panel');
     if (!panel) return;
 
+    const detailsState = {};
+    panel.querySelectorAll('details[data-section]').forEach(details => {
+      detailsState[details.dataset.section] = details.open;
+    });
+
     const current = moduleFromLocation();
     const next = nextDueModule();
     const nextText = next
@@ -1317,14 +1322,14 @@
           <button class="pta-action-btn" data-action="ranking">☷ Voir le classement</button>
         </div>
 
-        <details>
+        <details data-section="modules" ${detailsState.modules ? 'open' : ''}>
           <summary>Modules surveillés</summary>
           <div class="pta-modules">
             ${modulesHtml || '<div class="pta-module"><span class="pta-module-name">Aucun module actif</span></div>'}
           </div>
         </details>
 
-        <details>
+        <details data-section="settings" ${detailsState.settings ? 'open' : ''}>
           <summary>Réglages automatiques</summary>
           <div class="pta-settings">
             ${optionButton('autoClaimExpeditions', 'Récompenses')}
