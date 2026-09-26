@@ -506,7 +506,7 @@ function moduleEnabled(moduleId) {
 
     if (
       config.autoGyms &&
-      (isLeagueIndexPage() || isGymPreparePage())
+      (isLeagueIndexPage() || isGymPreparePage() || isGymResultLikePage())
     ) {
       let priority = 8350;
       let reason = 'vérification du Circuit des Arènes';
@@ -514,6 +514,9 @@ function moduleEnabled(moduleId) {
       if (isGymPreparePage()) {
         priority = 9350;
         reason = 'composition et lancement du combat d’arène';
+      } else if (isGymResultLikePage()) {
+        priority = 9200;
+        reason = 'résultat d’arène à clôturer';
       } else if (leagueDailyStatus() === true && availableGymContext()) {
         priority = 8500;
         reason = 'combat d’arène du jour disponible';
