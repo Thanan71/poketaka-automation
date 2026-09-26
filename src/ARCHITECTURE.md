@@ -8,6 +8,8 @@ La logique métier ne doit plus y être ajoutée.
 - `src/core/config.js` — configuration, constantes et table des types.
 - `src/core/state.js` — état persistant et primitives communes.
 - `src/core/dom.js` — détection et clics DOM sûrs.
+- `src/account/snapshot.js` — état global observé du compte : niveau, roster, Pokédex, Ligue et progression d'expéditions.
+- `src/planner/goals.js` — objectifs globaux, dépendances de progression et bonus de priorité pour l'orchestrateur.
 - `src/features/expeditions/team.js` — snapshot du roster, efficacité des types, viabilité et composition d'équipe.
 - `src/features/expeditions/capture.js` — détection des rencontres, contexte de capture, décisions et exécution.
 - `src/features/expeditions/cycle.js` — machine d'état expédition et résultats.
@@ -69,3 +71,26 @@ Tampermonkey contrôle lui-même la fréquence à laquelle il vérifie `@updateU
 5. l'exécute même si la version du userscript installée par Tampermonkey est encore plus ancienne.
 
 Tampermonkey continuera à mettre à jour le loader via `@updateURL` selon ses propres réglages, mais ce délai ne bloque plus les mises à jour fonctionnelles.
+
+
+## Goal Planner v0.9
+
+L'orchestrateur ne choisit plus uniquement la meilleure action locale. À chaque cycle :
+
+1. `account/snapshot.js` consolide les informations réellement observées dans le DOM et l'état persistant ;
+2. `planner/goals.js` choisit un objectif principal et une étape suivante ;
+3. le module correspondant reçoit un bonus de priorité ;
+4. Smart Expedition peut recevoir une expédition cible précise lorsque celle-ci est une dépendance ;
+5. après chaque navigation ou résultat, le snapshot et le plan sont recalculés.
+
+Le planner n'invente pas les données absentes. Une information inconnue reste `null` et réduit la confiance du plan.
+
+Les dépendances actuellement comprises incluent :
+
+- niveau dresseur requis ;
+- nombre d'espèces capturées requis ;
+- nombre de badges requis ;
+- expédition précédente ;
+- expédition explicitement exigée par une Arène ;
+- soins nécessaires avant un combat d'Arène ;
+- combat d'Arène quotidien déjà consommé.
