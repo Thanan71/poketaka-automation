@@ -264,20 +264,18 @@ function detachedResultCandidates(root) {
 }
 
 async function findPendingExpeditionResult(indexPage) {
-  if (isExpeditionResultPage()) {
-    return {
-      title:
-        document.querySelector('.page-header h1, main h1')?.textContent?.trim() ||
-        expeditionCycle().title ||
-        'Expédition terminée',
-      resultUrl: location.href,
-      dueAt: null,
-      status: 'pending_result',
-    };
-  }
-
   const previous = expeditionCycle();
   const candidates = detachedResultCandidates(indexPage.doc);
+
+  if (isExpeditionResultPage()) {
+    candidates.unshift({
+      title:
+        document.querySelector('.page-header h1, main h1')?.textContent?.trim() ||
+        previous.title ||
+        'Expédition terminée',
+      resultUrl: location.href,
+    });
+  }
 
   if (
     previous.resultUrl &&
