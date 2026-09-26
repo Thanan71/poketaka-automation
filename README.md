@@ -102,10 +102,11 @@ Les captures sont désactivées car le choix d'une Ball/Baie peut consommer des 
 ## Développement
 
 ```bash
+npm run build
 npm run check
 ```
 
-Aucun build n'est nécessaire : `poketaka.user.js` est directement installable dans Tampermonkey.
+La logique métier se trouve dans `src/`. Le fichier `poketaka.user.js` racine est un loader minimal généré pour Tampermonkey ; il ne doit pas recevoir directement les fonctionnalités du bot.
 
 ## État du reverse engineering
 
@@ -177,19 +178,20 @@ Le dashboard affiche la dernière décision de l'orchestrateur, l'équipe intell
 
 ## Architecture modulaire et mises à jour
 
-Le fichier racine `poketaka.user.js` est désormais un loader minimal. La logique du bot se trouve dans `src/` et est répartie par responsabilité.
+Le fichier racine `poketaka.user.js` est un loader minimal. La logique du bot se trouve dans `src/` et est répartie par responsabilité.
 
-À chaque push sur `main`, GitHub Actions :
+Le dépôt étant public, la distribution utilise directement **GitHub Raw**. À chaque push sur `main`, GitHub Actions :
 
-1. assemble les modules dans `dist/runtime.js` ;
-2. génère un loader Tampermonkey avec une nouvelle version `YYYY.M.D.<run>` ;
-3. vérifie la syntaxe ;
-4. publie `runtime.js` et `poketaka.user.js` via GitHub Pages.
+1. calcule une nouvelle version strictement au format `X.X.X` ;
+2. conserve une version explicitement choisie comme `0.8.0`, sinon incrémente le patch ;
+3. assemble les modules dans `dist/runtime.js` ;
+4. génère le loader Tampermonkey ;
+5. vérifie la syntaxe ;
+6. commit automatiquement les artefacts générés avec `[skip ci]`.
 
-Une modification de n'importe quel fichier du repository entraîne donc une nouvelle version Tampermonkey publiée automatiquement, sans recopier la logique dans le loader.
+URLs utilisées :
 
-URL de mise à jour configurée dans le loader :
-
-`https://thanan71.github.io/poketaka-automation/poketaka.user.js`
+- loader : `https://raw.githubusercontent.com/Thanan71/poketaka-automation/main/poketaka.user.js`
+- runtime : `https://raw.githubusercontent.com/Thanan71/poketaka-automation/main/dist/runtime.js`
 
 Le détail des responsabilités des fichiers est dans `src/ARCHITECTURE.md`.
