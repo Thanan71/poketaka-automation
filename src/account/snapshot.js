@@ -32,6 +32,7 @@ function emptyAccountSnapshot() {
       selectedTitle: null,
       dueAt: null,
       completedTitles: [],
+      locked: [],
       failureStreaks: {},
     },
     pokedex: {
@@ -54,7 +55,35 @@ function accountSnapshot() {
   return state.accountSnapshot;
 }
 
+function missionHubProgress() {
+  const root = document.querySelector('.mission-hub__progress');
+  if (!root) return null;
+
+  const result = {
+    trainerLevel: null,
+    capturedSpecies: null,
+  };
+
+  root.querySelectorAll(':scope > div').forEach(row => {
+    const label = normalizeText(row.querySelector('span')?.textContent || '');
+    const value = parseNumber(row.querySelector('strong')?.textContent);
+
+    if (value == null) return;
+    if (label === 'niveau' || label.includes('niveau dresseur')) {
+      result.trainerLevel = value;
+    }
+    if (label.includes('especes capturees')) {
+      result.capturedSpecies = value;
+    }
+  });
+
+  return result;
+}
+
 function parseTrainerLevelFromDom() {
+  const hub = missionHubProgress();
+  if (hub?.trainerLevel != null) return hub.trainerLevel;
+
   const direct = document.querySelector(
     '[data-trainer-level], .trainer-level, .trainer-profile__level, .profile-level'
   );
@@ -79,6 +108,14 @@ function parseTrainerLevelFromDom() {
 }
 
 function parsePokedexProgressFromDom() {
+  const hub = missionHubProgress();
+  if (hub?.capturedSpecies != null) {
+    return {
+      capturedSpecies: hub.capturedSpecies,
+      totalSpecies: null,
+    };
+  }
+
   const root = document.querySelector(
     '[data-pokedex-progress], .pokedex-progress, .dex-progress'
   );
@@ -209,6 +246,71 @@ function rosterSnapshotForAccount() {
   };
 }
 
+function parseExpeditionLockRequirement(text, previousTitle = null) {
+  const raw = String(text || '').trim();
+  const normalized = normalizeText(raw);
+
+  let match = normalized.match(/niveau de dresseur requis\s*:?\s*(\d+)/i);
+  if (match) {
+    return { type: 'trainer_level', target: Number(match[1]), label: raw };
+  }
+
+  match = normalized.match(/especes capturees requises\s*:?\s*(\d+)/i);
+  if (match) {
+    return { type: 'captured_species', target: Number(match[1]), label: raw };
+  }
+
+  match = normalized.match(/badges requis\s*:?\s*(\d+)/i);
+  if (match) {
+    return { type: 'badges', target: Number(match[1]), label: raw };
+  }
+
+  if (/terminez d abord l expedition precedente|terminez l expedition precedente/.test(normalized)) {
+    return {
+      type: 'previous_expedition',
+      target: previousTitle ? normalizeText(previousTitle) : null,
+      label: raw,
+    };
+  }
+
+  return { type: 'unknown', target: raw, label: raw };
+}
+
+function parseLockedExpeditionsFromDom() {
+  if (!/^\/expeditions\/?$/.test(location.pathname)) return null;
+
+  const availableTitles = [
+    ...document.querySelectorAll(
+      '.mission-tabset__panel[data-panel="available"] article h3, [data-panel="available"] article h3'
+    ),
+  ]
+    .map(node => node.textContent?.trim())
+    .filter(Boolean);
+
+  const lockedCards = [
+    ...document.querySelectorAll('.mission-locked__grid article'),
+  ];
+
+  let previousTitle = availableTitles[availableTitles.length - 1] || null;
+
+  return lockedCards.map(card => {
+    const title = card.querySelector('h3')?.textContent?.trim() || 'Destination verrouillée';
+    const requirements = [...card.querySelectorAll('li')]
+      .map(node => parseExpeditionLockRequirement(node.textContent || '', previousTitle))
+      .filter(requirement => requirement.label);
+
+    const result = {
+      title,
+      normalizedTitle: normalizeText(title),
+      difficulty: card.querySelector('.mission-difficulty')?.textContent?.trim() || null,
+      requirements,
+    };
+
+    previousTitle = title;
+    return result;
+  });
+}
+
 function expeditionSnapshotForAccount() {
   const cycle = expeditionCycle();
   const failureStreaks = {};
@@ -237,6 +339,10 @@ function expeditionSnapshotForAccount() {
     selectedTitle: state.selectedExpedition || null,
     dueAt: cycle.dueAt || null,
     completedTitles: [...completed],
+    locked:
+      parseLockedExpeditionsFromDom() ??
+      state.accountSnapshot?.expeditions?.locked ??
+      [],
     failureStreaks,
   };
 }
@@ -291,7 +397,7 @@ function observeAccountSnapshot() {
       ? {
           known: true,
           capturedSpecies: pokedex.capturedSpecies,
-          totalSpecies: pokedex.totalSpecies,
+          totalSpecies: pokedex.totalSpecies ?? previous.pokedex?.totalSpecies ?? null,
         }
       : (previous.pokedex || emptyAccountSnapshot().pokedex),
     resources: {
