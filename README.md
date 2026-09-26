@@ -195,3 +195,24 @@ URLs utilisées :
 - runtime : `https://raw.githubusercontent.com/Thanan71/poketaka-automation/main/dist/runtime.js`
 
 Le détail des responsabilités des fichiers est dans `src/ARCHITECTURE.md`.
+
+
+## Smart Expedition v0.8
+
+Le choix d'une expédition et le choix de l'équipe sont désormais liés.
+
+Le bot mémorise le roster réellement visible sur une page de préparation, puis utilise ce snapshot pour estimer les prochaines missions depuis le catalogue. L'évaluation prend en compte :
+
+- le niveau conseillé de la mission ;
+- les PV actuels des Pokémon ;
+- les types principaux de la mission ;
+- les avantages offensifs de types ;
+- les résistances et faiblesses défensives ;
+- le nombre de Pokémon requis ;
+- la diversité des types lorsque plusieurs membres sont nécessaires ;
+- l'historique d'échecs de la mission ;
+- la progression de zone, qui reste prioritaire sur le simple rendement temporel.
+
+Le snapshot n'est qu'une prévision. Avant le lancement, le bot relit toujours le roster réel de la page de préparation. Si aucune composition viable n'existe, la mission est temporairement écartée et le bot revient au catalogue pour choisir une destination plus adaptée.
+
+Une mission temporairement écartée est réessayée plus tard afin d'éviter une boucle permanente sur une difficulté devenue accessible après un gain de niveau ou des soins.
