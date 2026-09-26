@@ -776,13 +776,6 @@
     };
     saveState(state);
 
-    if (isVisible(best.card)) {
-      return clickElement(
-        best.card,
-        `Équipe intelligente: ${best.name} (score ${best.score})`
-      );
-    }
-
     const select = [...requirement.form.querySelectorAll('select[data-team-select]')]
       .find(input => !input.value && [...input.options].some(option => option.value === best.id));
 
@@ -790,11 +783,21 @@
       select.value = best.id;
       select.dispatchEvent(new Event('input', { bubbles: true }));
       select.dispatchEvent(new Event('change', { bubbles: true }));
-      state.lastAction = `Équipe intelligente: ${best.name}`;
+      state.lastAction = `Équipe intelligente: ${best.name} (score ${best.score})`;
       state.lastActionAt = now();
+      state.lastBotClickAt = now();
+      state.actions += 1;
       saveState(state);
       updatePanel();
+      log('Équipe intelligente via select:', best);
       return true;
+    }
+
+    if (isVisible(best.card)) {
+      return clickElement(
+        best.card,
+        `Équipe intelligente: ${best.name} (score ${best.score})`
+      );
     }
 
     return false;
