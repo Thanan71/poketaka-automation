@@ -2,7 +2,7 @@
 (() => {
   'use strict';
 
-  const VERSION = "0.8.5";
+  const VERSION = "0.8.6";
 
 // ---- src/core/config.js ----
 const STORAGE_KEY = 'poketaka-automation:config';
@@ -142,6 +142,15 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
         action: 'none',
         reason: null,
         species: null,
+        isNew: null,
+        rarity: null,
+        ivScore: null,
+        ballName: null,
+        ballCode: null,
+        ballReserve: null,
+        captureChance: null,
+        attemptsRemaining: null,
+        updatedAt: 0,
       },
       expeditionStats: {},
       lastRecordedResultUrl: null,
@@ -767,6 +776,387 @@ async function handleExpeditionPreparation() {
   return false;
 }
 
+// ---- src/features/expeditions/capture.js ----
+function resultEncounterRoot() {
+  const exact = document.querySelector(
+    '.mission-encounter, section.mission-encounter, [data-capture-form]'
+  );
+
+  if (exact) {
+    return exact.matches?.('[data-capture-form]')
+      ? exact.closest('.mission-encounter, section, article, div') || exact
+      : exact;
+  }
+
+  const selectors = [
+    '[data-encounter-pokemon]',
+    '[data-capture-encounter]',
+    '[data-pokemon-encounter]',
+    '.encounter-card',
+    '[class*="encounter"]',
+  ];
+
+  const direct = document.querySelector(selectors.join(','));
+  if (direct) return direct;
+
+  const button = findClickable([
+    'capturer',
+    'lancer la ball',
+    'lancer ball',
+    'lancer pokeball',
+    'lancer une pokeball',
+    'throw ball',
+    'throw pokeball',
+    'fuir',
+    'run away',
+  ]);
+
+  return button?.closest('article, section, .card, div') || null;
+}
+
+function captureForm(root = resultEncounterRoot()) {
+  if (!root) return null;
+
+  return root.matches?.('form[data-capture-form]')
+    ? root
+    : root.querySelector(
+      'form[data-capture-form], form[action*="/expeditions/encounters/"][action$="/capture"], form[action*="/capture"]'
+    );
+}
+
+function captureSubmitButton(root = resultEncounterRoot()) {
+  const form = captureForm(root);
+  if (!form) return null;
+
+  const exact = form.querySelector(
+    'button.primary-button[type="submit"], button[type="submit"], input[type="submit"]'
+  );
+
+  if (exact && isVisible(exact) && !exact.disabled) return exact;
+
+  return findClickable([
+    'lancer la ball',
+    'lancer ball',
+    'capturer',
+    'capture',
+    'lancer pokeball',
+    'lancer une pokeball',
+    'throw ball',
+    'throw pokeball',
+  ], form, {
+    exclude: ['chance de capture', 'taux de capture'],
+  });
+}
+
+function selectedBallInfo(root = resultEncounterRoot()) {
+  const form = captureForm(root);
+  if (!form) {
+    return {
+      code: null,
+      name: null,
+      reserve: null,
+      multiplierBps: null,
+    };
+  }
+
+  const checked = form.querySelector('input[name="ball_code"]:checked');
+  const label = checked?.closest('label');
+  const selected = form.querySelector(
+    '[data-capture-select-value], .capture-select__value'
+  );
+
+  const name =
+    label?.querySelector('span')?.textContent?.trim() ||
+    selected?.querySelector('span')?.textContent?.trim() ||
+    checked?.value ||
+    null;
+
+  const countText =
+    label?.querySelector('strong')?.textContent ||
+    selected?.querySelector('strong')?.textContent ||
+    '';
+  const countMatch = countText.match(/\d+/);
+
+  return {
+    code: checked?.value || null,
+    name,
+    reserve: countMatch ? Number(countMatch[0]) : null,
+    multiplierBps: parseNumber(checked?.getAttribute('data-multiplier-bps')),
+  };
+}
+
+function readBallReserve(root = resultEncounterRoot()) {
+  const selectedBall = selectedBallInfo(root);
+  if (selectedBall.reserve != null) return selectedBall.reserve;
+
+  const explicit = [...document.querySelectorAll(
+    '[data-ball-count], [data-item-code*="ball" i], [data-item-name*="ball" i]'
+  )];
+
+  for (const element of explicit) {
+    const values = [
+      element.getAttribute('data-ball-count'),
+      element.getAttribute('data-quantity'),
+      element.getAttribute('data-count'),
+      element.textContent,
+    ];
+
+    for (const value of values) {
+      const match = String(value || '').match(/\d+/);
+      if (match) return Number(match[0]);
+    }
+  }
+
+  const pageText = normalizeText(document.body?.innerText || '');
+  const match = pageText.match(
+    /(?:poke ?ball|super ?ball|hyper ?ball|ball)[^\d]{0,15}(\d+)/i
+  );
+  return match ? Number(match[1]) : null;
+}
+
+function parseCaptureChance(root) {
+  const element = root?.querySelector('[data-capture-chance], .capture-chance');
+  const text = normalizeText(element?.textContent || '');
+  const match = text.match(/(\d+(?:[.,]\d+)?)\s*%/);
+  return match ? parseNumber(match[1]) : null;
+}
+
+function parseCaptureAttempts(root) {
+  const text = normalizeText(
+    root?.querySelector('.mission-encounter__attempts')?.textContent || ''
+  );
+  const match = text.match(/(\d+)\s*(?:tentative|tentatives|attempt|attempts)/i);
+  return match ? Number(match[1]) : null;
+}
+
+function captureContext() {
+  const root = resultEncounterRoot();
+  if (!root) return null;
+
+  const text = normalizeText(root.innerText || root.textContent || '');
+  const captureButton = captureSubmitButton(root);
+  const selectedBall = selectedBallInfo(root);
+
+  const skipButton = findClickable([
+    'fuir',
+    'ignorer',
+    'passer',
+    'continuer sans capturer',
+    'laisser partir',
+    'run away',
+    'skip',
+    'leave',
+  ], root) ||
+    findClickable([
+      'fuir',
+      'continuer sans capturer',
+      'laisser partir',
+      'run away',
+    ]);
+
+  const species =
+    root.getAttribute('data-pokemon-name') ||
+    root.getAttribute('data-species-name') ||
+    root.querySelector('[data-pokemon-name]')?.getAttribute('data-pokemon-name') ||
+    root.querySelector('.mission-encounter__identity h3')?.textContent?.trim() ||
+    root.querySelector('h3')?.textContent?.trim() ||
+    'Pokémon rencontré';
+
+  let isNew =
+    parseOptionalBoolean(root.getAttribute('data-new-species')) ??
+    parseOptionalBoolean(root.getAttribute('data-new'));
+
+  const owned =
+    parseOptionalBoolean(root.getAttribute('data-owned')) ??
+    parseOptionalBoolean(root.getAttribute('data-captured'));
+
+  if (isNew == null && owned != null) isNew = !owned;
+
+  if (
+    isNew == null &&
+    /absente? du pokedex|absent from pokedex|nouvelle espece|premiere capture|jamais capture|non capture|new species|first capture/.test(text)
+  ) {
+    isNew = true;
+  }
+
+  if (
+    isNew == null &&
+    /presente? dans le pokedex|deja capture|deja possede|already caught|already owned/.test(text)
+  ) {
+    isNew = false;
+  }
+
+  const rarity =
+    normalizeText(root.getAttribute('data-rarity') || '') ||
+    (text.match(/\b(commun|peu commun|rare|epique|legendaire|mythique|common|uncommon|epic|legendary|mythic)\b/)?.[1] || '');
+
+  const ivRaw =
+    root.getAttribute('data-iv-total') ||
+    root.getAttribute('data-iv-score') ||
+    text.match(/(?:iv|ivs)[^\d]{0,12}(\d+(?:[.,]\d+)?)/i)?.[1];
+
+  return {
+    root,
+    form: captureForm(root),
+    captureButton,
+    skipButton,
+    species: String(species).trim(),
+    isNew,
+    rarity,
+    ivScore: parseNumber(ivRaw),
+    ballCode: selectedBall.code,
+    ballName: selectedBall.name,
+    ballReserve: selectedBall.reserve ?? readBallReserve(root),
+    ballMultiplierBps: selectedBall.multiplierBps,
+    captureChance: parseCaptureChance(root),
+    attemptsRemaining: parseCaptureAttempts(root),
+    text,
+  };
+}
+
+function decideCapture(context) {
+  if (!context?.captureButton) {
+    return { action: 'none', reason: 'Aucune capture disponible' };
+  }
+
+  if (context.attemptsRemaining === 0) {
+    return { action: 'none', reason: 'Aucune tentative restante' };
+  }
+
+  if (!config.autoCapture) {
+    return { action: 'manual', reason: 'Capture auto désactivée' };
+  }
+
+  if (
+    context.ballReserve != null &&
+    context.ballReserve <= config.minBallReserve
+  ) {
+    return {
+      action: context.skipButton ? 'skip' : 'ignore',
+      reason: `Réserve protégée · ${context.ballReserve}/${config.minBallReserve}`,
+    };
+  }
+
+  if (!config.smartCapture) {
+    return {
+      action: 'capture',
+      reason: context.captureChance != null
+        ? `Capture auto simple · ${context.captureChance}%`
+        : 'Capture auto simple',
+    };
+  }
+
+  if (config.captureNewSpecies && context.isNew === true) {
+    return {
+      action: 'capture',
+      reason: context.captureChance != null
+        ? `Nouvelle espèce · ${context.captureChance}%`
+        : 'Nouvelle espèce',
+    };
+  }
+
+  if (
+    config.captureRare &&
+    /rare|epique|legendaire|mythique|epic|legendary|mythic/.test(context.rarity)
+  ) {
+    return {
+      action: 'capture',
+      reason: context.captureChance != null
+        ? `${context.rarity} · ${context.captureChance}%`
+        : `Rareté · ${context.rarity}`,
+    };
+  }
+
+  if (
+    context.ivScore != null &&
+    context.ivScore >= config.minCaptureIvScore &&
+    context.ivScore <= 100
+  ) {
+    return {
+      action: 'capture',
+      reason: `IV ${context.ivScore} ≥ ${config.minCaptureIvScore}`,
+    };
+  }
+
+  if (config.captureUnknownEncounters && context.isNew == null) {
+    return {
+      action: 'capture',
+      reason: context.captureChance != null
+        ? `Rencontre inconnue · ${context.captureChance}%`
+        : 'Rencontre inconnue autorisée',
+    };
+  }
+
+  return {
+    action: context.skipButton ? 'skip' : 'ignore',
+    reason: context.isNew === false
+      ? 'Doublon non prioritaire'
+      : 'Aucun critère intelligent validé',
+  };
+}
+
+function captureDecisionSnapshot(context, decision) {
+  return {
+    action: decision.action,
+    reason: decision.reason,
+    species: context?.species || null,
+    isNew: context?.isNew ?? null,
+    rarity: context?.rarity || null,
+    ivScore: context?.ivScore ?? null,
+    ballName: context?.ballName || null,
+    ballCode: context?.ballCode || null,
+    ballReserve: context?.ballReserve ?? null,
+    captureChance: context?.captureChance ?? null,
+    attemptsRemaining: context?.attemptsRemaining ?? null,
+    updatedAt: now(),
+  };
+}
+
+function resultPageHasPendingCapture() {
+  const context = captureContext();
+  return Boolean(context?.captureButton || context?.skipButton);
+}
+
+async function captureEncounter() {
+  const context = captureContext();
+  if (!context) return false;
+
+  const decision = decideCapture(context);
+  state.captureDecision = captureDecisionSnapshot(context, decision);
+  saveState(state);
+  updatePanel();
+
+  if (decision.action === 'capture' && context.captureButton) {
+    return clickElement(
+      context.captureButton,
+      `Capture: ${context.species} — ${decision.reason}`
+    );
+  }
+
+  if (decision.action === 'skip' && context.skipButton) {
+    return clickElement(
+      context.skipButton,
+      `Capture ignorée: ${context.species} — ${decision.reason}`
+    );
+  }
+
+  if (decision.action === 'manual') {
+    setExpeditionPhase('awaiting_capture');
+    state.lastAction = `Capture manuelle: ${context.species} — ${decision.reason}`;
+    saveState(state);
+    updatePanel();
+    return false;
+  }
+
+  if (decision.action === 'ignore') {
+    state.lastAction = `Capture laissée: ${context.species} — ${decision.reason}`;
+    saveState(state);
+    updatePanel();
+  }
+
+  return false;
+}
+
 // ---- src/features/expeditions/cycle.js ----
 async function claimExpedition() {
     if (!config.autoClaimExpeditions) return false;
@@ -859,285 +1249,7 @@ async function claimExpedition() {
     return null;
   }
 
-  function resultEncounterRoot() {
-    const exact = document.querySelector(
-      '.mission-encounter, section.mission-encounter, [data-capture-form]'
-    );
-
-    if (exact) {
-      return exact.matches?.('[data-capture-form]')
-        ? exact.closest('.mission-encounter, section, article, div') || exact
-        : exact;
-    }
-
-    const selectors = [
-      '[data-encounter-pokemon]',
-      '[data-capture-encounter]',
-      '[data-pokemon-encounter]',
-      '.encounter-card',
-      '[class*="encounter"]',
-    ];
-
-    const direct = document.querySelector(selectors.join(','));
-    if (direct) return direct;
-
-    const button = findClickable([
-      'capturer',
-      'lancer la ball',
-      'lancer ball',
-      'lancer pokeball',
-      'lancer une pokeball',
-      'throw ball',
-      'throw pokeball',
-      'fuir',
-      'run away',
-    ]);
-
-    return button?.closest('article, section, .card, div') || null;
-  }
-
-  function captureForm(root = resultEncounterRoot()) {
-    if (!root) return null;
-    return root.matches?.('form[data-capture-form]')
-      ? root
-      : root.querySelector(
-        'form[data-capture-form], form[action*="/expeditions/encounters/"][action$="/capture"], form[action*="/capture"]'
-      );
-  }
-
-  function captureSubmitButton(root = resultEncounterRoot()) {
-    const form = captureForm(root);
-    if (!form) return null;
-
-    const exact = form.querySelector(
-      'button.primary-button[type="submit"], button[type="submit"], input[type="submit"]'
-    );
-
-    if (exact && isVisible(exact) && !exact.disabled) return exact;
-
-    return findClickable([
-      'lancer la ball',
-      'lancer ball',
-      'capturer',
-      'capture',
-      'lancer pokeball',
-      'lancer une pokeball',
-      'throw ball',
-      'throw pokeball',
-    ], form, {
-      exclude: ['chance de capture', 'taux de capture'],
-    });
-  }
-
-  function readBallReserve(root = resultEncounterRoot()) {
-    const form = captureForm(root);
-
-    if (form) {
-      const checked = form.querySelector('input[name="ball_code"]:checked');
-      const checkedLabel = checked?.closest('label');
-      const checkedCount = checkedLabel?.querySelector('strong')?.textContent || '';
-      const checkedMatch = checkedCount.match(/\d+/);
-      if (checkedMatch) return Number(checkedMatch[0]);
-
-      const selectedCount = form.querySelector(
-        '[data-capture-select-value] strong, .capture-select__value strong'
-      )?.textContent || '';
-      const selectedMatch = selectedCount.match(/\d+/);
-      if (selectedMatch) return Number(selectedMatch[0]);
-    }
-
-    const explicit = [...document.querySelectorAll(
-      '[data-ball-count], [data-item-code*="ball" i], [data-item-name*="ball" i]'
-    )];
-
-    for (const element of explicit) {
-      const values = [
-        element.getAttribute('data-ball-count'),
-        element.getAttribute('data-quantity'),
-        element.getAttribute('data-count'),
-        element.textContent,
-      ];
-
-      for (const value of values) {
-        const match = String(value || '').match(/\d+/);
-        if (match) return Number(match[0]);
-      }
-    }
-
-    const pageText = normalizeText(document.body?.innerText || '');
-    const match = pageText.match(/(?:poke ?ball|super ?ball|hyper ?ball|ball)[^\d]{0,15}(\d+)/i);
-    return match ? Number(match[1]) : null;
-  }
-
-  function parseCaptureChance(root) {
-    const element = root?.querySelector('[data-capture-chance], .capture-chance');
-    const text = normalizeText(element?.textContent || '');
-    const match = text.match(/(\d+(?:[.,]\d+)?)\s*%/);
-    return match ? parseNumber(match[1]) : null;
-  }
-
-  function parseCaptureAttempts(root) {
-    const text = normalizeText(
-      root?.querySelector('.mission-encounter__attempts')?.textContent || ''
-    );
-    const match = text.match(/(\d+)\s*(?:tentative|tentatives|attempt|attempts)/i);
-    return match ? Number(match[1]) : null;
-  }
-
-  function captureContext() {
-    const root = resultEncounterRoot();
-    if (!root) return null;
-
-    const text = normalizeText(root.innerText || root.textContent || '');
-    const captureButton = captureSubmitButton(root);
-
-    const skipButton = findClickable([
-      'fuir',
-      'ignorer',
-      'passer',
-      'continuer sans capturer',
-      'laisser partir',
-      'run away',
-      'skip',
-      'leave',
-    ], root) ||
-      findClickable([
-        'fuir',
-        'continuer sans capturer',
-        'laisser partir',
-        'run away',
-      ]);
-
-    const species =
-      root.getAttribute('data-pokemon-name') ||
-      root.getAttribute('data-species-name') ||
-      root.querySelector('[data-pokemon-name]')?.getAttribute('data-pokemon-name') ||
-      root.querySelector('.mission-encounter__identity h3')?.textContent?.trim() ||
-      root.querySelector('h3')?.textContent?.trim() ||
-      'Pokémon rencontré';
-
-    let isNew =
-      parseOptionalBoolean(root.getAttribute('data-new-species')) ??
-      parseOptionalBoolean(root.getAttribute('data-new'));
-
-    const owned =
-      parseOptionalBoolean(root.getAttribute('data-owned')) ??
-      parseOptionalBoolean(root.getAttribute('data-captured'));
-
-    if (isNew == null && owned != null) isNew = !owned;
-
-    if (
-      isNew == null &&
-      /absente? du pokedex|absent from pokedex|nouvelle espece|premiere capture|jamais capture|non capture|new species|first capture/.test(text)
-    ) {
-      isNew = true;
-    }
-
-    if (
-      isNew == null &&
-      /presente? dans le pokedex|deja capture|deja possede|already caught|already owned/.test(text)
-    ) {
-      isNew = false;
-    }
-
-    const rarity =
-      normalizeText(root.getAttribute('data-rarity') || '') ||
-      (text.match(/\b(commun|peu commun|rare|epique|legendaire|mythique|common|uncommon|epic|legendary|mythic)\b/)?.[1] || '');
-
-    const ivRaw =
-      root.getAttribute('data-iv-total') ||
-      root.getAttribute('data-iv-score') ||
-      text.match(/(?:iv|ivs)[^\d]{0,12}(\d+(?:[.,]\d+)?)/i)?.[1];
-
-    return {
-      root,
-      form: captureForm(root),
-      captureButton,
-      skipButton,
-      species: String(species).trim(),
-      isNew,
-      rarity,
-      ivScore: parseNumber(ivRaw),
-      ballReserve: readBallReserve(root),
-      captureChance: parseCaptureChance(root),
-      attemptsRemaining: parseCaptureAttempts(root),
-      text,
-    };
-  }
-
-  function decideCapture(context) {
-    if (!context?.captureButton) {
-      return { action: 'none', reason: 'Aucun bouton de capture visible' };
-    }
-
-    if (!config.autoCapture) {
-      return { action: 'manual', reason: 'Captures automatiques désactivées' };
-    }
-
-    if (
-      context.ballReserve != null &&
-      context.ballReserve <= config.minBallReserve
-    ) {
-      return {
-        action: context.skipButton ? 'skip' : 'manual',
-        reason: `Réserve de Balls protégée (${context.ballReserve} ≤ ${config.minBallReserve})`,
-      };
-    }
-
-    if (!config.smartCapture) {
-      return { action: 'capture', reason: 'Mode capture simple' };
-    }
-
-    if (config.captureNewSpecies && context.isNew === true) {
-      return {
-        action: 'capture',
-        reason: context.captureChance != null
-          ? `Nouvelle espèce · ${context.captureChance}%`
-          : 'Nouvelle espèce',
-      };
-    }
-
-    if (
-      config.captureRare &&
-      /rare|epique|legendaire|mythique|epic|legendary|mythic/.test(context.rarity)
-    ) {
-      return { action: 'capture', reason: `Rareté: ${context.rarity}` };
-    }
-
-    if (
-      context.ivScore != null &&
-      context.ivScore >= config.minCaptureIvScore &&
-      context.ivScore <= 100
-    ) {
-      return {
-        action: 'capture',
-        reason: `IV ${context.ivScore} ≥ ${config.minCaptureIvScore}`,
-      };
-    }
-
-    if (config.captureUnknownEncounters && context.isNew == null) {
-      return {
-        action: 'capture',
-        reason: context.captureChance != null
-          ? `Rencontre inconnue autorisée · ${context.captureChance}%`
-          : 'Rencontre inconnue autorisée',
-      };
-    }
-
-    return {
-      action: context.skipButton ? 'skip' : 'manual',
-      reason: context.isNew === false
-        ? 'Doublon sans critère prioritaire'
-        : 'Informations insuffisantes pour consommer une Ball',
-    };
-  }
-
-  function resultPageHasPendingCapture() {
-    const context = captureContext();
-    return Boolean(context?.captureButton || context?.skipButton);
-  }
-
-function recordExpeditionOutcome() {
+  function recordExpeditionOutcome() {
     if (!isExpeditionResultPage()) return;
     if (state.lastRecordedResultUrl === location.pathname) return;
 
@@ -1356,43 +1468,6 @@ async function healTeam() {
       'take egg',
     ]);
     return button ? clickElement(button, 'Récupération pension') : false;
-  }
-
-  async function captureEncounter() {
-    const context = captureContext();
-    if (!context) return false;
-
-    const decision = decideCapture(context);
-    state.captureDecision = {
-      action: decision.action,
-      reason: decision.reason,
-      species: context.species,
-    };
-    saveState(state);
-    updatePanel();
-
-    if (decision.action === 'capture' && context.captureButton) {
-      return clickElement(
-        context.captureButton,
-        `Capture: ${context.species} — ${decision.reason}`
-      );
-    }
-
-    if (decision.action === 'skip' && context.skipButton) {
-      return clickElement(
-        context.skipButton,
-        `Capture ignorée: ${context.species} — ${decision.reason}`
-      );
-    }
-
-    if (decision.action === 'manual') {
-      setExpeditionPhase('awaiting_capture');
-      state.lastAction = `Capture manuelle: ${context.species} — ${decision.reason}`;
-      saveState(state);
-      updatePanel();
-    }
-
-    return false;
   }
 
 // ---- src/features/expeditions/catalog.js ----
@@ -2814,6 +2889,141 @@ GM_addStyle(`
     #pta-panel .pta-badge.wait { background: var(--pta-amber-soft); color: #fde68a; }
     #pta-panel .pta-badge.current { background: var(--pta-blue-soft); color: #bfdbfe; }
     #pta-panel .pta-badge.danger { background: var(--pta-red-soft); color: #fecaca; }
+    #pta-panel .pta-badge.neutral { background: rgba(148,163,184,.10); color: #cbd5e1; }
+
+    #pta-panel .pta-capture-card {
+      margin-top: 9px;
+      padding: 11px;
+      border: 1px solid var(--pta-border);
+      border-radius: 13px;
+      background: linear-gradient(145deg, rgba(245,158,11,.055), rgba(255,255,255,.025));
+    }
+    #pta-panel .pta-capture-card[data-tone="ready"] {
+      border-color: rgba(34,197,94,.24);
+      background: linear-gradient(145deg, rgba(34,197,94,.08), rgba(255,255,255,.025));
+    }
+    #pta-panel .pta-capture-card[data-tone="danger"] {
+      border-color: rgba(239,68,68,.24);
+      background: linear-gradient(145deg, rgba(239,68,68,.08), rgba(255,255,255,.025));
+    }
+    #pta-panel .pta-capture-card[data-tone="wait"] {
+      border-color: rgba(245,158,11,.24);
+    }
+    #pta-panel .pta-capture-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    #pta-panel .pta-capture-title {
+      min-width: 0;
+      font-size: 12px;
+      font-weight: 790;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    #pta-panel .pta-capture-subtitle {
+      margin-top: 2px;
+      color: var(--pta-muted);
+      font-size: 9px;
+      font-weight: 650;
+    }
+    #pta-panel .pta-capture-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 6px;
+      margin-top: 9px;
+    }
+    #pta-panel .pta-capture-stat {
+      min-width: 0;
+      padding: 7px 8px;
+      border-radius: 9px;
+      background: rgba(255,255,255,.035);
+      border: 1px solid rgba(255,255,255,.055);
+    }
+    #pta-panel .pta-capture-stat strong {
+      display: block;
+      margin-top: 2px;
+      color: var(--pta-text);
+      font-size: 11px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    #pta-panel .pta-capture-reason {
+      margin-top: 8px;
+      color: #cbd5e1;
+      font-size: 10px;
+      line-height: 1.4;
+    }
+    #pta-panel .pta-capture-progress {
+      height: 5px;
+      margin-top: 8px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: rgba(255,255,255,.07);
+    }
+    #pta-panel .pta-capture-progress > span {
+      display: block;
+      height: 100%;
+      border-radius: inherit;
+      background: var(--pta-blue);
+    }
+    #pta-panel .pta-settings-note {
+      grid-column: 1 / -1;
+      color: var(--pta-muted);
+      font-size: 9px;
+      line-height: 1.45;
+      padding: 1px 2px 4px;
+    }
+    #pta-panel .pta-stepper {
+      grid-column: 1 / -1;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto auto;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 8px;
+      border: 1px solid var(--pta-border);
+      border-radius: 10px;
+      background: rgba(255,255,255,.025);
+    }
+    #pta-panel .pta-stepper-label {
+      min-width: 0;
+      color: #cbd5e1;
+      font-size: 10px;
+      font-weight: 650;
+    }
+    #pta-panel .pta-stepper-label small {
+      display: block;
+      margin-top: 1px;
+      color: var(--pta-muted);
+      font-size: 8px;
+      font-weight: 600;
+    }
+    #pta-panel .pta-stepper-value {
+      min-width: 35px;
+      text-align: center;
+      font-size: 10px;
+      font-weight: 800;
+    }
+    #pta-panel .pta-stepper-controls {
+      display: flex;
+      gap: 4px;
+    }
+    #pta-panel .pta-stepper-btn {
+      width: 24px;
+      height: 24px;
+      display: grid;
+      place-items: center;
+      border: 1px solid var(--pta-border);
+      border-radius: 8px;
+      background: rgba(255,255,255,.045);
+      color: var(--pta-text);
+      cursor: pointer;
+      font-weight: 800;
+    }
+    #pta-panel .pta-stepper-btn:hover { background: rgba(255,255,255,.09); }
 
     #pta-panel .pta-chip-row {
       display: flex;
@@ -3132,6 +3342,32 @@ GM_addStyle(`
       };
     }
 
+    let liveCapture = null;
+    try {
+      liveCapture = isExpeditionResultPage() ? captureContext() : null;
+    } catch {
+      liveCapture = null;
+    }
+
+    if (liveCapture) {
+      const captureDecision = decideCapture(liveCapture);
+      const meta = captureActionMeta(captureDecision.action);
+      const title = captureDecision.action === 'capture'
+        ? `Capturer ${liveCapture.species}`
+        : captureDecision.action === 'manual'
+          ? `Capture manuelle · ${liveCapture.species}`
+          : captureDecision.action === 'skip' || captureDecision.action === 'ignore'
+            ? `Ignorer ${liveCapture.species}`
+            : `Rencontre · ${liveCapture.species}`;
+
+      return {
+        title,
+        reason: captureDecision.reason,
+        tone: meta.tone === 'neutral' ? '' : meta.tone,
+        icon: captureDecision.action === 'capture' ? '◎' : captureDecision.action === 'manual' ? '!' : '→',
+      };
+    }
+
     if (expeditionCycle().phase === 'awaiting_capture') {
       return {
         title: 'Décision de capture requise',
@@ -3199,6 +3435,54 @@ GM_addStyle(`
     return keys.filter(key => Boolean(config[key])).length;
   }
 
+  function captureActionMeta(action) {
+    const map = {
+      capture: { label: 'Capturer', tone: 'ready' },
+      skip: { label: 'Passer', tone: 'wait' },
+      ignore: { label: 'Ignorer', tone: 'wait' },
+      manual: { label: 'Manuel', tone: 'danger' },
+      none: { label: 'Aucune action', tone: 'neutral' },
+    };
+    return map[action] || map.none;
+  }
+
+  function captureModeLabel() {
+    if (!config.autoCapture) return 'Manuel';
+    if (!config.smartCapture) return 'Auto simple';
+    return 'Intelligent';
+  }
+
+  function liveCapturePanelState() {
+    let context = null;
+    if (isExpeditionResultPage()) {
+      try {
+        context = captureContext();
+      } catch {
+        context = null;
+      }
+    }
+
+    if (context) {
+      const decision = decideCapture(context);
+      return {
+        active: true,
+        ...captureDecisionSnapshot(context, decision),
+      };
+    }
+
+    return {
+      active: false,
+      ...(state.captureDecision || {}),
+    };
+  }
+
+  function stepCaptureSetting(key, delta, min, max) {
+    const current = Number(config[key] ?? min);
+    config[key] = Math.max(min, Math.min(max, current + delta));
+    saveConfig(config);
+    updatePanel();
+  }
+
   function ensurePanel() {
     if (document.getElementById('pta-panel')) return;
     const panel = document.createElement('div');
@@ -3223,6 +3507,26 @@ GM_addStyle(`
         config.panelCollapsed = !config.panelCollapsed;
         saveConfig(config);
         updatePanel();
+        return;
+      }
+
+      if (action === 'capture-reserve-dec') {
+        stepCaptureSetting('minBallReserve', -1, 0, 99);
+        return;
+      }
+
+      if (action === 'capture-reserve-inc') {
+        stepCaptureSetting('minBallReserve', 1, 0, 99);
+        return;
+      }
+
+      if (action === 'capture-iv-dec') {
+        stepCaptureSetting('minCaptureIvScore', -5, 0, 100);
+        return;
+      }
+
+      if (action === 'capture-iv-inc') {
+        stepCaptureSetting('minCaptureIvScore', 5, 0, 100);
         return;
       }
 
@@ -3316,9 +3620,10 @@ GM_addStyle(`
       'autoProgression',
       'autoPlant',
     ];
-    const intelligenceKeys = ['smartTeam', 'smartCapture'];
+    const intelligenceKeys = ['smartTeam'];
     const captureKeys = [
       'autoCapture',
+      'smartCapture',
       'captureNewSpecies',
       'captureRare',
       'captureUnknownEncounters',
@@ -3350,14 +3655,31 @@ GM_addStyle(`
       .map(label => chipHtml(label))
       .join('');
 
-    const captureLabel = state.captureDecision?.species
-      ? `${state.captureDecision.species} · ${state.captureDecision.action}`
+    const captureView = liveCapturePanelState();
+    const captureMeta = captureActionMeta(captureView.action);
+    const captureLabel = captureView.species
+      ? `${captureView.species} · ${captureMeta.label}`
       : 'Aucune décision';
-    const captureTone = state.captureDecision?.action === 'capture'
-      ? 'ready'
-      : state.captureDecision?.action === 'manual'
-        ? 'danger'
-        : '';
+    const captureTone = captureMeta.tone === 'neutral' ? '' : captureMeta.tone;
+    const captureSpeciesStatus = captureView.isNew === true
+      ? 'Nouvelle espèce'
+      : captureView.isNew === false
+        ? 'Déjà au Pokédex'
+        : 'Statut inconnu';
+    const captureBallLabel = captureView.ballName
+      ? `${captureView.ballName}${captureView.ballReserve != null ? ` ×${captureView.ballReserve}` : ''}`
+      : captureView.ballReserve != null
+        ? `Balls ×${captureView.ballReserve}`
+        : '—';
+    const captureChanceLabel = captureView.captureChance != null
+      ? `${captureView.captureChance}%`
+      : '—';
+    const captureAttemptsLabel = captureView.attemptsRemaining != null
+      ? String(captureView.attemptsRemaining)
+      : '—';
+    const captureProgress = captureView.captureChance != null
+      ? Math.max(0, Math.min(100, captureView.captureChance))
+      : 0;
 
     panel.dataset.collapsed = String(Boolean(config.panelCollapsed));
     panel.innerHTML = `
@@ -3459,6 +3781,53 @@ GM_addStyle(`
           ` : ''}
         </section>
 
+        ${captureView.active ? `
+          <section class="pta-capture-card" data-tone="${captureTone || 'neutral'}" aria-label="Décision de capture">
+            <div class="pta-capture-head">
+              <div>
+                <div class="pta-eyebrow">Rencontre sauvage</div>
+                <div class="pta-capture-title" title="${escapeHtml(captureView.species || '')}">
+                  ${escapeHtml(captureView.species || 'Pokémon rencontré')}
+                </div>
+                <div class="pta-capture-subtitle">${escapeHtml(captureSpeciesStatus)}</div>
+              </div>
+              <span class="pta-badge ${captureMeta.tone}">${escapeHtml(captureMeta.label)}</span>
+            </div>
+
+            <div class="pta-capture-grid">
+              <div class="pta-capture-stat">
+                <div class="pta-label">Chance</div>
+                <strong>${escapeHtml(captureChanceLabel)}</strong>
+              </div>
+              <div class="pta-capture-stat">
+                <div class="pta-label">Ball</div>
+                <strong title="${escapeHtml(captureBallLabel)}">${escapeHtml(captureBallLabel)}</strong>
+              </div>
+              <div class="pta-capture-stat">
+                <div class="pta-label">Tentatives</div>
+                <strong>${escapeHtml(captureAttemptsLabel)}</strong>
+              </div>
+            </div>
+
+            ${captureView.captureChance != null ? `
+              <div class="pta-capture-progress" title="Chance de capture ${escapeHtml(captureChanceLabel)}">
+                <span style="width: ${captureProgress}%"></span>
+              </div>
+            ` : ''}
+
+            <div class="pta-capture-reason">
+              <strong>${escapeHtml(captureModeLabel())}</strong> ·
+              ${escapeHtml(captureView.reason || 'Aucune raison disponible')}
+            </div>
+
+            <div class="pta-chip-row">
+              ${captureView.rarity ? chipHtml(`Rareté · ${captureView.rarity}`) : ''}
+              ${captureView.ivScore != null ? chipHtml(`IV · ${captureView.ivScore}`) : ''}
+              ${captureView.ballReserve != null ? chipHtml(`Réserve min · ${config.minBallReserve}`) : ''}
+            </div>
+          </section>
+        ` : ''}
+
         <div class="pta-actions">
           <button class="pta-action-btn primary" data-action="run">▶ Exécuter un cycle</button>
           <button class="pta-action-btn" data-action="ranking">☷ Classement</button>
@@ -3499,7 +3868,7 @@ GM_addStyle(`
             <div class="pta-module">
               <span class="pta-mini-dot ${captureTone}"></span>
               <span class="pta-module-name">Capture</span>
-              <span class="pta-module-status" title="${escapeHtml(state.captureDecision?.reason || '')}">
+              <span class="pta-module-status" title="${escapeHtml(captureView.reason || '')}">
                 ${escapeHtml(captureLabel)}
               </span>
             </div>
@@ -3543,22 +3912,48 @@ GM_addStyle(`
           </summary>
           <div class="pta-settings">
             ${optionButton('smartTeam', 'Équipe intelligente')}
-            ${optionButton('smartCapture', 'Capture intelligente')}
           </div>
         </details>
 
         <details data-section="capture-settings" ${detailsState['capture-settings'] ? 'open' : ''}>
           <summary>
             <span class="pta-summary-main">Captures</span>
-            <span class="pta-summary-meta">
-              ${enabledOptionCount(captureKeys)}/${captureKeys.length}
-            </span>
+            <span class="pta-summary-meta">${escapeHtml(captureModeLabel())}</span>
           </summary>
           <div class="pta-settings">
-            ${optionButton('autoCapture', 'Captures auto')}
+            <div class="pta-settings-note">
+              <strong>Capture auto</strong> autorise le bot à lancer une Ball.
+              <strong>Capture intelligente</strong> applique ensuite les critères ci-dessous.
+            </div>
+            ${optionButton('autoCapture', 'Capture auto')}
+            ${optionButton('smartCapture', 'Capture intelligente')}
             ${optionButton('captureNewSpecies', 'Nouvelles espèces')}
             ${optionButton('captureRare', 'Rares')}
-            ${optionButton('captureUnknownEncounters', 'Captures inconnues')}
+            ${optionButton('captureUnknownEncounters', 'Inconnues')}
+
+            <div class="pta-stepper">
+              <div class="pta-stepper-label">
+                Réserve minimale
+                <small>Ne pas consommer les dernières Balls</small>
+              </div>
+              <div class="pta-stepper-value">${config.minBallReserve}</div>
+              <div class="pta-stepper-controls">
+                <button class="pta-stepper-btn" data-action="capture-reserve-dec" title="Réduire la réserve">−</button>
+                <button class="pta-stepper-btn" data-action="capture-reserve-inc" title="Augmenter la réserve">+</button>
+              </div>
+            </div>
+
+            <div class="pta-stepper">
+              <div class="pta-stepper-label">
+                IV minimum
+                <small>Critère utilisé si les IV sont visibles</small>
+              </div>
+              <div class="pta-stepper-value">${config.minCaptureIvScore}</div>
+              <div class="pta-stepper-controls">
+                <button class="pta-stepper-btn" data-action="capture-iv-dec" title="Réduire le seuil IV">−</button>
+                <button class="pta-stepper-btn" data-action="capture-iv-inc" title="Augmenter le seuil IV">+</button>
+              </div>
+            </div>
           </div>
         </details>
 
