@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.9.11 - 2026-09-26
+
+- Nouveau chantier de fiabilisation de l'état interne des expéditions.
+- Centralisation de l'analyse d'un bilan d'expédition : rencontre active, formulaire de récupération et état réel des récompenses.
+- Réinitialisation de `captureDecision` lorsqu'un bilan frais ne contient plus de rencontre et après confirmation de récupération des récompenses.
+- Nettoyage de `selectedExpedition` et `expeditionPlan` uniquement après un état serveur confirmé comme finalisé ou libre.
+- Invariant renforcé : la présence d'un formulaire `/claim` interdit `ready_to_start` et tout retour vers la liste des expéditions.
+- Le claim visible suit maintenant la réponse serveur afin de ne pas conserver un DOM périmé après un POST réussi.
+- Ajout de gardes anti-double-action pour les POST directs et les clics DOM répétés ; les POST idempotents sont distingués par leur `idempotency_key`.
+- Les transitions d'expédition journalisent désormais explicitement l'état avant et après.
+- Ajout de tests comportementaux à partir de fragments HTML de bilan PokéTaka avec LinkeDOM.
+- La CI installe les dépendances de test avant `npm run check`.
+
+## 0.9.10 - 2026-09-26
+
+- Correction de la boucle `greenhouse-plant` provoquée par le bouton "Replanter" du panneau du bot.
+- Les helpers DOM ignorent désormais tous les contrôles situés dans `#pta-panel`.
+- `clickElement()` refuse également explicitement tout élément appartenant au panneau.
+- Ajout d'un test de non-régression empêchant l'automatisation de cliquer sa propre interface.
+
 ## 0.9.9 - 2026-09-26
 
 - Correction de la récupération automatique des récompenses d'expédition.
