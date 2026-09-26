@@ -31,6 +31,7 @@ function emptyAccountSnapshot() {
       activeTitle: null,
       selectedTitle: null,
       dueAt: null,
+      completedTitles: [],
       failureStreaks: {},
     },
     pokedex: {
@@ -211,10 +212,23 @@ function rosterSnapshotForAccount() {
 function expeditionSnapshotForAccount() {
   const cycle = expeditionCycle();
   const failureStreaks = {};
+  const completed = new Set(
+    Array.isArray(state.accountSnapshot?.expeditions?.completedTitles)
+      ? state.accountSnapshot.expeditions.completedTitles
+      : []
+  );
 
   for (const [title, stats] of Object.entries(state.expeditionStats || {})) {
     const streak = Number(stats?.failureStreak || 0);
     if (streak > 0) failureStreaks[title] = streak;
+    if (Number(stats?.successes || 0) > 0) completed.add(normalizeText(title));
+  }
+
+  if (/^\/expeditions\/?$/.test(location.pathname)) {
+    document.querySelectorAll('.mission-archives a strong').forEach(node => {
+      const title = normalizeText(node.textContent || '');
+      if (title) completed.add(title);
+    });
   }
 
   return {
@@ -222,6 +236,7 @@ function expeditionSnapshotForAccount() {
     activeTitle: cycle.title || null,
     selectedTitle: state.selectedExpedition || null,
     dueAt: cycle.dueAt || null,
+    completedTitles: [...completed],
     failureStreaks,
   };
 }
