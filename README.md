@@ -140,3 +140,37 @@ La console affiche pour chaque choix détecté : score, zone, chance, niveau req
 9. prépare puis lance la meilleure destination détectée.
 
 Le moteur n'appelle toujours aucune API privée et ne contourne aucun timer serveur.
+
+
+## Progression intelligente v0.7
+
+La v0.7 ajoute trois couches de décision au-dessus du cycle d'expédition.
+
+### Équipe intelligente
+
+Sur une page de préparation, le script lit les Pokémon réellement disponibles dans le constructeur d'équipe et leur niveau, PV, types, statut favori et objet tenu. Il compare ces données au niveau conseillé et aux types principaux de la mission, classe les candidats puis remplit le formulaire avec le meilleur candidat disponible.
+
+Un Pokémon sous le seuil de PV configuré est fortement pénalisé. Le choix de types est un heuristique basé sur la table d'efficacité Pokémon standard ; il ne suppose pas que le script connaît les attaques exactes du Pokémon.
+
+### Adaptation à la difficulté
+
+Le script mémorise les résultats explicitement identifiables comme succès ou échec sur les pages de résultat. Une mission ayant échoué plusieurs fois de suite reçoit une forte pénalité afin que le mode progression puisse revenir vers une destination moins difficile au lieu de boucler indéfiniment.
+
+Le pourcentage affiché dans les détails d'une mission est interprété comme une chance de rencontre, conformément au libellé PokéTaka, et non comme une probabilité de réussite.
+
+### Captures intelligentes
+
+Lorsque Captures auto est activé, le script peut prioriser :
+
+- une espèce explicitement indiquée comme nouvelle ;
+- une rencontre explicitement rare, épique, légendaire ou mythique ;
+- un score d'IV explicite au-dessus du seuil ;
+- les rencontres inconnues seulement si l'option correspondante est activée.
+
+Une réserve minimale de Balls est conservée lorsqu'un compteur exploitable est visible. Par défaut, les rencontres dont le statut est insuffisamment documenté ne consomment pas automatiquement de Ball.
+
+### Orchestrateur global
+
+À chaque cycle, le script construit un plan priorisé. Les confirmations et résultats d'expédition passent avant la préparation, les soins et récupérations, puis viennent les actions de progression et la navigation vers un module dont un timer ou indicateur signale qu'une action est nécessaire.
+
+Le dashboard affiche la dernière décision de l'orchestrateur, l'équipe intelligente utilisée et la dernière décision de capture.
