@@ -51,15 +51,17 @@ function pokemonProfileId() {
   return location.pathname.split('/').filter(Boolean)[1] || null;
 }
 
-function collectionPokemonRecords() {
-  if (!isCollectionIndexPage()) return [];
+function collectionPokemonRecords(root = document, baseUrl = location.href) {
+  if (root === document && !isCollectionIndexPage()) return [];
 
-  return [...document.querySelectorAll('a.pokemon-record[href*="/collection/"]')]
-    .filter(isVisible)
+  return [...root.querySelectorAll('a.pokemon-record[href*="/collection/"]')]
+    .filter(card => root !== document || isVisible(card))
     .map(card => {
       let id = null;
+      let href = null;
       try {
-        const url = new URL(card.href, location.href);
+        const url = new URL(card.getAttribute('href') || card.href, baseUrl);
+        href = url.href;
         id = url.pathname.split('/').filter(Boolean)[1] || null;
       } catch {}
 
@@ -71,26 +73,33 @@ function collectionPokemonRecords() {
           .map(img => canonicalType(img.alt))
           .filter(Boolean),
         favorite: Boolean(card.querySelector('[aria-label="Favori"]')),
-        href: card.href,
+        href,
         card,
       };
     })
-    .filter(record => record.id);
+    .filter(record => record.id && record.href);
 }
 
-function pokemonProfileContext() {
-  if (!isPokemonProfilePage()) return null;
+function pokemonProfileContext(rootDoc = document, profileUrl = location.href) {
+  if (rootDoc === document && !isPokemonProfilePage()) return null;
 
-  const root = document.querySelector('#pokemon-profile-section');
-  const resourceStrip = document.querySelector('.pokemon-resource-strip');
-  const name = root?.querySelector('#pokemon-profile-title')?.textContent?.trim() || 'Pokémon';
-  const level = pokemonNumber(root?.querySelector('.pokemon-profile__level-badge strong')?.textContent);
-  const hpProgress = root?.querySelector('progress.pokemon-health');
+  const root = rootDoc.querySelector('#pokemon-profile-section');
+  if (!root) return null;
+
+  const resourceStrip = rootDoc.querySelector('.pokemon-resource-strip');
+  const name = root.querySelector('#pokemon-profile-title')?.textContent?.trim() || 'Pokémon';
+  const level = pokemonNumber(root.querySelector('.pokemon-profile__level-badge strong')?.textContent);
+  const hpProgress = root.querySelector('progress.pokemon-health');
   const badges = normalizeText(
-    [...(root?.querySelectorAll('.pokemon-profile__badges .status-badge') || [])]
+    [...(root.querySelectorAll('.pokemon-profile__badges .status-badge') || [])]
       .map(node => node.textContent || '')
       .join(' ')
   );
+
+  let id = null;
+  try {
+    id = new URL(profileUrl, location.href).pathname.split('/').filter(Boolean)[1] || null;
+  } catch {}
 
   let stardust = null;
   let candies = null;
@@ -108,20 +117,23 @@ function pokemonProfileContext() {
     }
   });
 
+  const activityHelp = rootDoc.querySelector(
+    '#pokemon-level-dialog .form-help, #pokemon-evolution-dialog .form-help'
+  );
+
   return {
-    id: pokemonProfileId(),
+    id,
     name,
     level,
     hpPercent: hpProgress ? Number(hpProgress.value || 0) : null,
     inActivity:
       badges.includes('en expedition') ||
-      Boolean(document.querySelector(
-        '#pokemon-level-dialog .form-help, #pokemon-evolution-dialog .form-help'
-      ) && /participe actuellement a une activite/.test(normalizeText(
-        document.querySelector(
-          '#pokemon-level-dialog .form-help, #pokemon-evolution-dialog .form-help'
-        )?.textContent || ''
-      ))),
+      Boolean(
+        activityHelp &&
+        /participe actuellement a une activite/.test(
+          normalizeText(activityHelp.textContent || '')
+        )
+      ),
     stardust,
     candies,
     candyName,
@@ -138,8 +150,8 @@ function gameplayRequirementInfo(node) {
   };
 }
 
-function pokemonLevelUpOption() {
-  const dialog = document.querySelector('#pokemon-level-dialog');
+function pokemonLevelUpOption(root = document) {
+  const dialog = root.querySelector('#pokemon-level-dialog');
   const form = dialog?.querySelector('form[action*="/level-up"]');
   if (!dialog || !form) {
     return {
@@ -190,8 +202,8 @@ function pokemonLevelUpOption() {
   };
 }
 
-function pokemonEvolutionOptions() {
-  const dialog = document.querySelector('#pokemon-evolution-dialog');
+function pokemonEvolutionOptions(root = document) {
+  const dialog = root.querySelector('#pokemon-evolution-dialog');
   if (!dialog) return [];
 
   return [...dialog.querySelectorAll('form[action*="/evolve"]')].map(form => {
