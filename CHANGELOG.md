@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.8.3 - 2026-09-26
+
+- Correction de la capture automatique sur la vraie page de résultat PokéTaka.
+- Détection native de `.mission-encounter` et `form[data-capture-form]`.
+- Support du bouton réel "Lancer la Ball".
+- "Absente du Pokédex" est désormais reconnue comme une nouvelle espèce.
+- Lecture exacte de la réserve depuis la Ball sélectionnée.
+- Lecture de la chance de capture et du nombre de tentatives restantes.
+- La protection de réserve de Balls reste appliquée avant tout lancer.
+
+
 ## 0.8.0 - 2026-09-26
 
 - Ajout d'un moteur Smart Expedition qui couple le choix de mission et la composition d'équipe.
