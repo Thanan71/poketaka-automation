@@ -584,6 +584,87 @@ GM_addStyle(`
     return { className: '', label: 'Non vérifié' };
   }
 
+  function expeditionPhaseMeta(phase) {
+    const phaseName = expeditionPhaseLabel(phase);
+    if (phase === 'due' || phase === 'claiming') {
+      return { tone: 'ready', label: phaseName };
+    }
+    if (phase === 'awaiting_capture') {
+      return { tone: 'danger', label: phaseName };
+    }
+    if (['preparing', 'starting', 'opening_result', 'result'].includes(phase)) {
+      return { tone: 'current', label: phaseName };
+    }
+    if (phase === 'running') {
+      return { tone: 'wait', label: phaseName };
+    }
+    return { tone: '', label: phaseName };
+  }
+
+  function panelNextDecision() {
+    const decision = state.orchestrator?.lastDecision;
+    const reason = state.orchestrator?.lastReason;
+
+    if (!config.enabled) {
+      return {
+        title: 'Automatisation en pause',
+        reason: 'Active le bot ou exécute un cycle manuel pour reprendre.',
+        tone: 'danger',
+        icon: 'Ⅱ',
+      };
+    }
+
+    if (expeditionCycle().phase === 'awaiting_capture') {
+      return {
+        title: 'Décision de capture requise',
+        reason: state.captureDecision?.reason || 'Une rencontre attend une décision.',
+        tone: 'danger',
+        icon: '!',
+      };
+    }
+
+    if (decision && decision !== 'wait') {
+      return {
+        title: decision.replace(/^navigation:/, 'Navigation · '),
+        reason: reason || 'Action prioritaire sélectionnée par l’orchestrateur.',
+        tone: 'current',
+        icon: '→',
+      };
+    }
+
+    const next = nextDueModule();
+    if (next) {
+      return {
+        title: `${next.module.label} dans ${formatRemaining(next.dueAt)}`,
+        reason: 'Aucune action immédiate, prochaine échéance connue.',
+        tone: 'wait',
+        icon: '◷',
+      };
+    }
+
+    return {
+      title: 'En attente',
+      reason: 'Aucune action nécessaire pour le moment.',
+      tone: '',
+      icon: '·',
+    };
+  }
+
+  function plannedTeamNames() {
+    const planned = state.expeditionPlan?.team;
+    if (Array.isArray(planned) && planned.length) return planned;
+    const previous = state.smartTeam?.lastSelection;
+    return Array.isArray(previous) ? previous.slice(-3) : [];
+  }
+
+  function chipHtml(label, title = '') {
+    return `<span class="pta-chip" title="${escapeHtml(title || label)}">${escapeHtml(label)}</span>`;
+  }
+
+  function enabledOptionCount(keys) {
+    return keys.filter(key => Boolean(config[key])).length;
+  }
+
   function ensurePanel() {
     if (document.getElementById('pta-panel')) return;
     const panel = document.createElement('div');
