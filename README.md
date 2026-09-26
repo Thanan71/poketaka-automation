@@ -161,12 +161,14 @@ Le pourcentage affiché dans les détails d'une mission est interprété comme u
 
 ### Captures intelligentes
 
-Lorsque Captures auto est activé, le script peut prioriser :
+Lorsque Captures auto est activé avec Capture intelligente, le script peut prioriser :
 
 - une espèce explicitement indiquée comme nouvelle ;
 - une rencontre explicitement rare, épique, légendaire ou mythique ;
 - un score d'IV explicite au-dessus du seuil ;
 - les rencontres inconnues seulement si l'option correspondante est activée.
+
+Un Pokémon explicitement indiqué comme **déjà possédé** est bloqué avant les critères Rare/IV. Le réglage **Autoriser doublons rares / IV** permet de réactiver volontairement ces captures et reste désactivé par défaut.
 
 Une réserve minimale de Balls est conservée lorsqu'un compteur exploitable est visible. Par défaut, les rencontres dont le statut est insuffisamment documenté ne consomment pas automatiquement de Ball.
 
