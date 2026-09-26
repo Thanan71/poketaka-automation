@@ -753,6 +753,39 @@ GM_addStyle(`
     const current = moduleFromLocation();
     const status = state.moduleStatus?.[module.id] || {};
 
+    if (module.id === 'pokemon' && (config.autoLevelPokemon || config.autoEvolvePokemon)) {
+      const progression = pokemonProgressionState();
+      if (expeditionCycle().phase === 'running') {
+        return { className: 'wait', label: 'Attend expédition' };
+      }
+
+      const labels = {
+        scanning: 'Analyse',
+        opening_profile: 'Inspection',
+        level_ready: 'Renforcement',
+        leveling: 'Renforcement',
+        evolution_ready: 'Évolution',
+        evolving: 'Évolution',
+        manual: 'Choix manuel',
+        blocked: 'Bloqué',
+        scanned: 'Analysé',
+        waiting_expedition: 'Attend expédition',
+      };
+
+      if (progression.phase && progression.phase !== 'idle') {
+        return {
+          className: ['level_ready', 'leveling', 'evolution_ready', 'evolving'].includes(progression.phase)
+            ? 'ready'
+            : progression.phase === 'manual'
+              ? 'danger'
+              : 'wait',
+          label: progression.targetName
+            ? `${labels[progression.phase] || progression.phase} · ${progression.targetName}`
+            : (labels[progression.phase] || progression.phase),
+        };
+      }
+    }
+
     if (module.id === 'progression' && config.autoGyms) {
       const gym = gymCycle();
       const badgeText = gym.badges != null
@@ -1024,6 +1057,16 @@ GM_addStyle(`
         return;
       }
 
+      if (action === 'stardust-reserve-dec') {
+        stepCaptureSetting('minStardustReserve', -100, 0, 999999);
+        return;
+      }
+
+      if (action === 'stardust-reserve-inc') {
+        stepCaptureSetting('minStardustReserve', 100, 0, 999999);
+        return;
+      }
+
       if (action === 'ranking') {
         const ranking = rankExpeditions();
         if (!ranking.length) {
@@ -1144,6 +1187,32 @@ GM_addStyle(`
           ? 'current'
           : '';
     const gymTitle = gym.arena || 'Circuit des Arènes';
+    const pokemonProgress = pokemonProgressionState();
+    const showPokemonProgress =
+      (config.autoLevelPokemon || config.autoEvolvePokemon) &&
+      (
+        pokemonProgress.phase !== 'idle' ||
+        expeditionCycle().phase === 'running'
+      );
+    const pokemonProgressPhase = expeditionCycle().phase === 'running'
+      ? 'Attente expédition'
+      : ({
+          scanning: 'Analyse',
+          opening_profile: 'Inspection',
+          level_ready: 'Renforcement prêt',
+          leveling: 'Renforcement',
+          evolution_ready: 'Évolution prête',
+          evolving: 'Évolution',
+          manual: 'Choix manuel',
+          blocked: 'Bloqué',
+          scanned: 'Analysé',
+          waiting_expedition: 'Attente expédition',
+        }[pokemonProgress.phase] || 'Progression');
+    const pokemonProgressTone = pokemonProgress.phase === 'manual'
+      ? 'danger'
+      : ['level_ready', 'leveling', 'evolution_ready', 'evolving'].includes(pokemonProgress.phase)
+        ? 'ready'
+        : 'wait';
     const nextText = next
       ? `${next.module.label} · ${formatRemaining(next.dueAt)}`
       : 'Aucune';
@@ -1157,6 +1226,8 @@ GM_addStyle(`
       'autoBreedingClaim',
       'autoProgression',
       'autoGyms',
+      'autoLevelPokemon',
+      'autoEvolvePokemon',
       'autoPlant',
     ];
     const intelligenceKeys = ['smartTeam'];
@@ -1388,6 +1459,33 @@ GM_addStyle(`
           </section>
         ` : ''}
 
+        ${showPokemonProgress ? `
+          <section class="pta-mission" aria-label="Progression Pokémon">
+            <div class="pta-mission-head">
+              <div class="pta-mission-name" title="${escapeHtml(pokemonProgress.targetName || 'Progression Pokémon')}">
+                ${escapeHtml(pokemonProgress.targetName || 'Progression Pokémon')}
+              </div>
+              <span class="pta-badge ${pokemonProgressTone}">
+                ${escapeHtml(pokemonProgressPhase)}
+              </span>
+            </div>
+
+            <div class="pta-chip-row">
+              ${pokemonProgress.targetLevel != null ? chipHtml(`Niveau · ${pokemonProgress.targetLevel}`) : ''}
+              ${chipHtml(`Réserve poussière · ${config.minStardustReserve}`)}
+              ${config.preserveEvolutionCandies ? chipHtml('Bonbons évolution protégés') : ''}
+            </div>
+
+            <div class="pta-status-copy">
+              ${escapeHtml(
+                expeditionCycle().phase === 'running'
+                  ? `Attente de la fin de ${expeditionCycle().title || 'l’expédition'} avant toute dépense.`
+                  : pokemonProgress.reason || 'Analyse de la progression disponible.'
+              )}
+            </div>
+          </section>
+        ` : ''}
+
         ${captureView.active ? `
           <section class="pta-capture-card" data-tone="${captureTone || 'neutral'}" aria-label="Décision de capture">
             <div class="pta-capture-head">
@@ -1539,6 +1637,42 @@ GM_addStyle(`
           </summary>
           <div class="pta-settings">
             ${optionButton('smartTeam', 'Équipe intelligente')}
+          </div>
+        </details>
+
+        <details data-section="pokemon-settings" ${detailsState['pokemon-settings'] ? 'open' : ''}>
+          <summary>
+            <span class="pta-summary-main">Progression Pokémon</span>
+            <span class="pta-summary-meta">
+              ${config.autoLevelPokemon && config.autoEvolvePokemon
+                ? 'Renfort + évolution'
+                : config.autoLevelPokemon
+                  ? 'Renfort'
+                  : config.autoEvolvePokemon
+                    ? 'Évolution'
+                    : 'Manuel'}
+            </span>
+          </summary>
+          <div class="pta-settings">
+            <div class="pta-settings-note">
+              Le bot attend la fin d’une expédition active et privilégie les Pokémon utiles au plan courant.
+              Une évolution à plusieurs branches reste toujours manuelle.
+            </div>
+            ${optionButton('autoLevelPokemon', 'Renforcement auto')}
+            ${optionButton('autoEvolvePokemon', 'Évolution auto')}
+            ${optionButton('preserveEvolutionCandies', 'Réserver bonbons évolution')}
+
+            <div class="pta-stepper">
+              <div class="pta-stepper-label">
+                Réserve Poussière
+                <small>Le renforcement ne descend pas sous cette réserve</small>
+              </div>
+              <div class="pta-stepper-value">${config.minStardustReserve}</div>
+              <div class="pta-stepper-controls">
+                <button class="pta-stepper-btn" data-action="stardust-reserve-dec" title="Réduire la réserve">−</button>
+                <button class="pta-stepper-btn" data-action="stardust-reserve-inc" title="Augmenter la réserve">+</button>
+              </div>
+            </div>
           </div>
         </details>
 
