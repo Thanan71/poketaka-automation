@@ -234,7 +234,17 @@ function gymProgressionGoal(snapshot) {
   const locked = nextLockedGym(snapshot);
   if (!locked) return null;
 
-  const unmet = firstUnmetRequirement(snapshot, locked.requirements || []);
+  const expectedPreviousBadges = Math.max(0, Number(locked.rank || 1) - 1);
+  const unmet = (locked.requirements || []).find(requirement => {
+    if (
+      requirement.type === 'badge' &&
+      Number(snapshot.league?.badges || 0) >= expectedPreviousBadges
+    ) {
+      return false;
+    }
+    return !requirementSatisfied(snapshot, requirement);
+  }) || null;
+
   if (!unmet) {
     return {
       primary: {
