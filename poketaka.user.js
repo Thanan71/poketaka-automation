@@ -304,8 +304,18 @@
   }
 
   function resultPageHasPendingCapture() {
-    const text = normalizeText(document.body?.innerText || '');
-    return /capturer|capture|lancer pokeball|throw pokeball|fuir|run away/.test(text);
+    return Boolean(
+      findClickable([
+        'capturer',
+        'lancer pokeball',
+        'lancer une pokeball',
+        'throw pokeball',
+        'fuir',
+        'run away',
+      ], document, {
+        exclude: ['historique', 'history', 'chance de capture'],
+      })
+    );
   }
 
   function resultPageLooksResolved() {
@@ -322,6 +332,11 @@
 
   async function handleExpeditionPreparation() {
     if (!config.autoStartExpeditions) return false;
+
+    const cycleState = expeditionCycle();
+    if (cycleState.phase === 'starting' && recentBotAction(5000)) {
+      return false;
+    }
 
     const launchButton = findClickable([
       'lancer l expedition',
@@ -419,13 +434,15 @@
         return false;
       }
 
-      if (!['preparing', 'starting'].includes(cycleState.phase)) {
-        setExpeditionPhase('ready_to_start', {
-          title: null,
-          resultUrl: null,
-          dueAt: null,
-        });
+      if (['preparing', 'starting'].includes(cycleState.phase)) {
+        return handleExpeditionPreparation();
       }
+
+      setExpeditionPhase('ready_to_start', {
+        title: null,
+        resultUrl: null,
+        dueAt: null,
+      });
 
       return startExpedition();
     }
