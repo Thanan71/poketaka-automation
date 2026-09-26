@@ -216,3 +216,22 @@ Le bot mémorise le roster réellement visible sur une page de préparation, pui
 Le snapshot n'est qu'une prévision. Avant le lancement, le bot relit toujours le roster réel de la page de préparation. Si aucune composition viable n'existe, la mission est temporairement écartée et le bot revient au catalogue pour choisir une destination plus adaptée.
 
 Une mission temporairement écartée est réessayée plus tard afin d'éviter une boucle permanente sur une difficulté devenue accessible après un gain de niveau ou des soins.
+
+
+## Arènes automatiques
+
+Le bot peut vérifier quotidiennement le Circuit des Arènes et utiliser automatiquement le combat du jour lorsqu'une arène est accessible.
+
+La boucle est :
+
+`Ligue → arène disponible → préparation → équipe viable → défi → retour au Circuit`.
+
+La composition utilise uniquement les Pokémon réellement proposés par PokéTaka. Le bot ne déduit pas les types ou niveaux adverses lorsqu'ils ne sont pas présents dans le DOM : il privilégie alors niveau, PV, disponibilité et diversité de types.
+
+Comme un défi consomme l'unique combat d'arène du jour, le lancement est suspendu si :
+
+- le nombre de Pokémon viables est inférieur au nombre demandé ;
+- un membre prévu est sous le seuil de PV d'arène ;
+- la sélection affichée ne correspond pas au plan calculé.
+
+Le seuil de PV est configurable depuis le panel et vaut 70 % par défaut.
