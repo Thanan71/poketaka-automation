@@ -857,6 +857,28 @@ async function backgroundStartExpedition(expeditionPage) {
   if (!assessment.plan.viable) {
     blockMissionTemporarily(selected.title, assessment.plan.reason);
     state.lastAction = `Mission écartée en arrière-plan: ${selected.title} — ${assessment.plan.reason}`;
+    appendActionLog(
+      'warning',
+      'expedition',
+      `Mission écartée: ${selected.title}`,
+      {
+        reason: assessment.plan.reason,
+        recommendedLevel: assessment.context?.recommendedLevel ?? null,
+        requiredTeamMin: requirement.min,
+        requiredTeamMax: requirement.max,
+        viableTeam: assessment.plan.team.map(pokemon => ({
+          name: pokemon.name,
+          level: pokemon.level,
+          hpPercent: Math.round(pokemon.hpPercent || 0),
+        })),
+        topCandidates: assessment.plan.ranked.slice(0, 5).map(pokemon => ({
+          name: pokemon.name,
+          level: pokemon.level,
+          viable: pokemon.viable,
+          score: pokemon.score,
+        })),
+      }
+    );
     saveState(state);
     updatePanel();
     return false;
@@ -1372,6 +1394,29 @@ async function runBackgroundAutomation() {
   ) {
     const expeditionAction = await backgroundStartExpedition(expeditionObservation.page);
     if (expeditionAction) return true;
+
+    // Si la mission explicitement demandée par le Goal Planner échoue au
+    // contrôle réel de l'équipe, donner d'abord une chance au renforcement
+    // Pokémon avant de farmer immédiatement une mission plus facile.
+    if (
+      state.expeditionPlan?.viability === 'blocked' &&
+      pokemonProgressionScanDue({ allowExpeditionFallback: true })
+    ) {
+      appendActionLog(
+        'info',
+        'pokemon',
+        'Mission cible bloquée — tentative de renforcement avant mission de repli',
+        {
+          mission: state.expeditionPlan.title || null,
+          reason: state.expeditionPlan.reason || null,
+        }
+      );
+
+      const pokemonAction = await backgroundHandlePokemonProgression({
+        allowExpeditionFallback: true,
+      });
+      if (pokemonAction) return true;
+    }
   }
 
   if (plan.step?.module === 'pokemon') {
@@ -1379,7 +1424,8 @@ async function runBackgroundAutomation() {
     if (pokemonAction) return true;
   }
 
-  // Entretien opportuniste, sans navigation visible.
+  // Entretien opportuniste, sans navigation visible. À ce stade, un éventuel
+  // renforcement prioritaire de l'équipe cible a déjà été tenté.
   if (!expeditionObservation.active) {
     const expeditionAction = await backgroundStartExpedition(expeditionObservation.page);
     if (expeditionAction) return true;
