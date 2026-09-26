@@ -2,7 +2,7 @@
 (() => {
   'use strict';
 
-  const VERSION = "0.9.6";
+  const VERSION = "0.9.7";
 
 // ---- src/core/config.js ----
 const STORAGE_KEY = 'poketaka-automation:config';
@@ -119,6 +119,8 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
       lastActionAt: 0,
       lastAction: 'aucune',
       lastBotClickAt: 0,
+      actionLog: [],
+      panelView: 'dashboard',
       httpTransport: {
         requests: 0,
         lastAt: 0,
@@ -299,6 +301,35 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
     GM_setValue(STATE_KEY, state);
   }
 
+  function actionLogEntries() {
+    return Array.isArray(state.actionLog) ? state.actionLog : [];
+  }
+
+  function appendActionLog(level, category, message, details = null) {
+    const entry = {
+      id: `${now()}-${Math.random().toString(36).slice(2, 8)}`,
+      at: now(),
+      level: level || 'info',
+      category: category || 'bot',
+      message: String(message || ''),
+      details: details == null
+        ? null
+        : typeof details === 'string'
+          ? details
+          : JSON.stringify(details),
+    };
+
+    state.actionLog = [entry, ...actionLogEntries()].slice(0, 120);
+    saveState(state);
+    return entry;
+  }
+
+  function clearActionLog() {
+    state.actionLog = [];
+    saveState(state);
+    updatePanel();
+  }
+
   function expeditionCycle() {
     if (!state.expeditionCycle || typeof state.expeditionCycle !== 'object') {
       state.expeditionCycle = {
@@ -322,8 +353,27 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
         ? previous.lastTransitionAt
         : now(),
     };
+    const changed =
+      previous.phase !== state.expeditionCycle.phase ||
+      previous.title !== state.expeditionCycle.title ||
+      previous.resultUrl !== state.expeditionCycle.resultUrl ||
+      previous.dueAt !== state.expeditionCycle.dueAt;
+
     saveState(state);
     updatePanel();
+
+    if (changed) {
+      appendActionLog(
+        'info',
+        'expedition',
+        `Cycle expédition → ${phase}`,
+        {
+          title: state.expeditionCycle.title,
+          dueAt: state.expeditionCycle.dueAt,
+        }
+      );
+    }
+
     log('Cycle expédition:', state.expeditionCycle);
   }
 
@@ -396,6 +446,15 @@ function elementText(el) {
     state.lastAction = actionName;
     state.actions += 1;
     markModuleAction(moduleFromLocation()?.id);
+    appendActionLog(
+      'info',
+      'dom',
+      actionName,
+      {
+        tag: el.tagName,
+        text: (el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 120),
+      }
+    );
     saveState(state);
     updatePanel();
 
@@ -600,6 +659,12 @@ async function fetchObservedPage(
       lastStatus: 'error',
       lastError: message,
     });
+    appendActionLog(
+      'error',
+      'background',
+      `GET arrière-plan échoué: ${url.pathname}`,
+      message
+    );
     log('GET background en échec', url.pathname, message);
     return null;
   } finally {
@@ -726,6 +791,13 @@ function recordDirectAction(actionName, kind, endpoint) {
     lastStatus: 'pending',
     lastError: null,
   });
+
+  appendActionLog(
+    'info',
+    'http',
+    actionName,
+    { method: 'POST', kind, endpoint, status: 'pending' }
+  );
 }
 
 function finalizeDirectNavigation(response) {
@@ -843,6 +915,17 @@ async function submitObservedForm(
       state.lastAction = `${actionName} — échec: ${message}`;
       saveState(state);
       updatePanel();
+      appendActionLog(
+        'error',
+        'http',
+        `${actionName} — échec`,
+        {
+          endpoint: url.pathname,
+          kind,
+          status: response.status,
+          message,
+        }
+      );
       log('HTTP direct en échec', {
         kind,
         endpoint: url.pathname,
@@ -856,6 +939,19 @@ async function submitObservedForm(
       lastStatus: response.status,
       lastError: null,
     });
+
+    appendActionLog(
+      'success',
+      'http',
+      `${actionName} — réussi`,
+      {
+        endpoint: url.pathname,
+        kind,
+        status: response.status,
+        finalUrl: response.url,
+        navigate,
+      }
+    );
 
     log('HTTP direct réussi', {
       kind,
@@ -875,6 +971,16 @@ async function submitObservedForm(
     state.lastAction = `${actionName} — erreur HTTP: ${message}`;
     saveState(state);
     updatePanel();
+    appendActionLog(
+      'error',
+      'http',
+      `${actionName} — erreur réseau`,
+      {
+        endpoint: url.pathname,
+        kind,
+        message,
+      }
+    );
     console.error('[PokéTaka Auto] HTTP direct', kind, error);
     return false;
   } finally {
@@ -901,6 +1007,12 @@ function navigateDirectly(urlLike, actionName) {
   state.lastAction = actionName;
   state.lastNavigationAt = now();
   state.actions += 1;
+  appendActionLog(
+    'info',
+    'navigation',
+    actionName,
+    { target: url.pathname }
+  );
   saveState(state);
   updatePanel();
 
@@ -4842,7 +4954,11 @@ function backgroundSweepDue() {
   const last = Number(backgroundHttpState().lastSweepAt || 0);
   const interval = Math.max(10, Number(config.backgroundRefreshSeconds || 30)) * 1000;
 
-  if (expeditionCycle().phase === 'due') return true;
+  if (
+    ['due', 'ready_to_start', 'preparing', 'starting'].includes(
+      expeditionCycle().phase
+    )
+  ) return true;
   if (leagueNeedsDailyCheck()) return true;
   if (pokemonProgressionScanDue()) return true;
 
@@ -5057,8 +5173,11 @@ function detachedLeagueInfo(root) {
   };
 }
 
-async function backgroundObserveExpeditions() {
-  const page = await fetchObservedPage('/expeditions', { cacheMs: 5000 });
+async function backgroundObserveExpeditions({ force = false } = {}) {
+  const page = await fetchObservedPage('/expeditions', {
+    cacheMs: force ? 0 : 5000,
+    force,
+  });
   if (!page) return { acted: false, page: null, active: null };
 
   const root = page.doc;
@@ -5344,6 +5463,64 @@ async function backgroundHandleExpeditionResult(active) {
   return false;
 }
 
+async function verifyBackgroundExpeditionLaunch(expectedTitle) {
+  const delays = [250, 700];
+
+  for (const delay of delays) {
+    if (delay) await sleep(delay);
+
+    const page = await fetchObservedPage('/expeditions', {
+      cacheMs: 0,
+      force: true,
+    });
+    if (!page) continue;
+
+    const active = detachedActiveExpeditionSnapshot(page.doc);
+    if (!active) continue;
+
+    mergeBackgroundExpeditionAccount(page.doc);
+
+    const dueAt = active.dueAt || null;
+    const phase = dueAt && dueAt <= now() + 1500 ? 'due' : 'running';
+
+    state.selectedExpedition = active.title;
+    state.selectedExpeditionScore = null;
+    state.expeditionPlan = {
+      ...state.expeditionPlan,
+      title: active.title,
+      viability: 'active',
+      reason: 'Lancement confirmé par GET /expeditions',
+      updatedAt: now(),
+    };
+
+    setExpeditionPhase(phase, {
+      title: active.title,
+      resultUrl: active.resultUrl,
+      dueAt,
+    });
+
+    appendActionLog(
+      'success',
+      'expedition',
+      `Lancement confirmé: ${active.title}`,
+      {
+        expected: expectedTitle,
+        phase,
+      }
+    );
+    saveState(state);
+    return active;
+  }
+
+  appendActionLog(
+    'warning',
+    'expedition',
+    `Lancement non confirmé: ${expectedTitle}`,
+    'Aucune expédition active observée après le POST'
+  );
+  return null;
+}
+
 async function backgroundStartExpedition(expeditionPage) {
   if (!config.autoStartExpeditions || !expeditionPage?.doc) return false;
 
@@ -5402,6 +5579,16 @@ async function backgroundStartExpedition(expeditionPage) {
 
   setExpeditionPhase('starting', { title: selected.title });
 
+  appendActionLog(
+    'info',
+    'expedition',
+    `Tentative de lancement silencieux: ${selected.title}`,
+    {
+      team: assessment.plan.team.map(pokemon => pokemon.name),
+      attempt: 1,
+    }
+  );
+
   const submitted = await submitObservedForm(
     requirement.form,
     `Lancement arrière-plan: ${selected.title}`,
@@ -5416,15 +5603,80 @@ async function backgroundStartExpedition(expeditionPage) {
     }
   );
 
-  if (!submitted) {
-    setExpeditionPhase('ready_to_start', {
-      title: null,
-      resultUrl: null,
-      dueAt: null,
-    });
+  if (submitted) {
+    const active = await verifyBackgroundExpeditionLaunch(selected.title);
+    if (active) return true;
   }
 
-  return submitted;
+  appendActionLog(
+    'warning',
+    'expedition',
+    `Nouvelle tentative silencieuse: ${selected.title}`,
+    'Le premier POST n’a pas produit d’expédition active vérifiable'
+  );
+
+  const retryPrepare = await fetchObservedPage(prepareUrl, {
+    cacheMs: 0,
+    force: true,
+  });
+
+  if (retryPrepare) {
+    const retryRequirement = expeditionTeamRequirement(retryPrepare.doc);
+
+    if (retryRequirement) {
+      const retryAssessment = preparationTeamPlan(retryRequirement);
+      const retryIds = retryAssessment.plan.team.map(pokemon => pokemon.id);
+
+      if (
+        retryAssessment.plan.viable &&
+        retryIds.length >= retryRequirement.min
+      ) {
+        appendActionLog(
+          'info',
+          'expedition',
+          `Tentative de lancement silencieux: ${selected.title}`,
+          {
+            team: retryAssessment.plan.team.map(pokemon => pokemon.name),
+            attempt: 2,
+          }
+        );
+
+        const retried = await submitObservedForm(
+          retryRequirement.form,
+          `Relance arrière-plan: ${selected.title}`,
+          {
+            expectedKind: 'expedition_launch',
+            navigate: false,
+            moduleId: 'expeditions',
+            overrides: {
+              selection_source: 'custom',
+              'pokemon_public_ids[]': retryIds,
+            },
+          }
+        );
+
+        if (retried) {
+          const active = await verifyBackgroundExpeditionLaunch(selected.title);
+          if (active) return true;
+        }
+      }
+    }
+  }
+
+  appendActionLog(
+    'error',
+    'expedition',
+    `Échec du lancement silencieux: ${selected.title}`,
+    httpTransportState().lastError || 'Aucune expédition active après deux tentatives'
+  );
+
+  setExpeditionPhase('ready_to_start', {
+    title: null,
+    resultUrl: null,
+    dueAt: null,
+  });
+
+  return false;
 }
 
 async function backgroundHandleLeague() {
@@ -5771,7 +6023,7 @@ async function runBackgroundAutomation() {
 
   backgroundMarkSweep();
 
-  const expeditionObservation = await backgroundObserveExpeditions();
+  let expeditionObservation = await backgroundObserveExpeditions();
 
   if (
     expeditionObservation.active &&
@@ -5781,6 +6033,12 @@ async function runBackgroundAutomation() {
       expeditionObservation.active
     );
     if (resultAction) return true;
+
+    if (expeditionCycle().phase === 'ready_to_start') {
+      expeditionObservation = await backgroundObserveExpeditions({
+        force: true,
+      });
+    }
   }
 
   const leaguePage = await fetchObservedPage('/league', { cacheMs: 6000 });
@@ -6468,11 +6726,20 @@ function moduleEnabled(moduleId) {
       });
     }
 
+    const backgroundExpeditionOwnsCycle =
+      config.backgroundHttpMode &&
+      backgroundRouteFresh('/expeditions') &&
+      !backgroundHttpState().lastError &&
+      state.captureDecision?.action !== 'manual';
+
     if (
-      isExpeditionResultPage() ||
-      isExpeditionPreparePage() ||
-      isExpeditionIndexPage() ||
-      ['due', 'ready_to_start', 'preparing', 'starting'].includes(expeditionState.phase)
+      !backgroundExpeditionOwnsCycle &&
+      (
+        isExpeditionResultPage() ||
+        isExpeditionPreparePage() ||
+        isExpeditionIndexPage() ||
+        ['due', 'ready_to_start', 'preparing', 'starting'].includes(expeditionState.phase)
+      )
     ) {
       let priority = 7200;
       let reason = 'cycle expédition';
@@ -6567,6 +6834,14 @@ function moduleEnabled(moduleId) {
       lastReason: candidate?.reason || 'aucune action nécessaire',
       lastPriority: candidate?.priority || 0,
     };
+    if (candidate) {
+      appendActionLog(
+        'success',
+        'orchestrator',
+        `Action exécutée: ${candidate.name}`,
+        { priority: candidate.priority, reason: candidate.reason }
+      );
+    }
     saveState(state);
     updatePanel();
   }
@@ -6597,6 +6872,12 @@ function moduleEnabled(moduleId) {
             return;
           }
         } catch (error) {
+          appendActionLog(
+            'error',
+            'orchestrator',
+            `Erreur: ${candidate.name}`,
+            error?.message || String(error)
+          );
           console.error('[PokéTaka Auto] Erreur orchestrateur', candidate.name, error);
         }
       }
@@ -6748,14 +7029,44 @@ GM_addStyle(`
       color: var(--pta-text);
     }
 
+    #pta-panel .pta-tabs {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      padding: 7px 10px;
+      border-bottom: 1px solid var(--pta-border);
+      background: rgba(255,255,255,.018);
+    }
+    #pta-panel .pta-tab-btn {
+      border: 1px solid transparent;
+      border-radius: 9px;
+      padding: 7px 9px;
+      background: transparent;
+      color: var(--pta-muted);
+      cursor: pointer;
+      font-size: 10px;
+      font-weight: 760;
+    }
+    #pta-panel .pta-tab-btn[data-active="true"] {
+      border-color: rgba(96,165,250,.20);
+      background: var(--pta-blue-soft);
+      color: #dbeafe;
+    }
+    #pta-panel .pta-tab-count {
+      margin-left: 4px;
+      opacity: .75;
+      font-size: 9px;
+    }
+
     #pta-panel .pta-body {
-      max-height: calc(min(760px, 100vh - 36px) - 62px);
+      max-height: calc(min(760px, 100vh - 36px) - 104px);
       overflow: auto;
       padding: 12px;
       scrollbar-width: thin;
       scrollbar-color: rgba(148,163,184,.35) transparent;
     }
-    #pta-panel[data-collapsed="true"] .pta-body { display: none; }
+    #pta-panel[data-collapsed="true"] .pta-body,
+    #pta-panel[data-collapsed="true"] .pta-tabs { display: none; }
     #pta-panel[data-collapsed="true"] { width: min(292px, calc(100vw - 24px)); }
 
     #pta-panel .pta-status-hero {
@@ -7301,6 +7612,97 @@ GM_addStyle(`
     #pta-panel .pta-mini-dot.current { background: var(--pta-blue); }
     #pta-panel .pta-mini-dot.danger { background: var(--pta-red); }
 
+    #pta-panel .pta-log-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 9px;
+    }
+    #pta-panel .pta-log-toolbar-copy {
+      min-width: 0;
+    }
+    #pta-panel .pta-log-toolbar-copy strong {
+      display: block;
+      font-size: 12px;
+    }
+    #pta-panel .pta-log-toolbar-copy small {
+      display: block;
+      margin-top: 2px;
+      color: var(--pta-muted);
+      font-size: 9px;
+    }
+    #pta-panel .pta-log-clear {
+      flex: 0 0 auto;
+      border: 1px solid var(--pta-border);
+      border-radius: 9px;
+      padding: 6px 8px;
+      background: rgba(255,255,255,.035);
+      color: var(--pta-muted);
+      cursor: pointer;
+      font-size: 9px;
+      font-weight: 760;
+    }
+    #pta-panel .pta-log-list {
+      display: grid;
+      gap: 7px;
+    }
+    #pta-panel .pta-log-entry {
+      padding: 9px 10px;
+      border: 1px solid var(--pta-border);
+      border-radius: 11px;
+      background: var(--pta-surface);
+    }
+    #pta-panel .pta-log-entry[data-level="success"] {
+      border-color: rgba(34,197,94,.20);
+    }
+    #pta-panel .pta-log-entry[data-level="warning"] {
+      border-color: rgba(245,158,11,.22);
+    }
+    #pta-panel .pta-log-entry[data-level="error"] {
+      border-color: rgba(239,68,68,.24);
+    }
+    #pta-panel .pta-log-entry-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    #pta-panel .pta-log-category {
+      color: #cbd5e1;
+      font-size: 9px;
+      font-weight: 820;
+      letter-spacing: .05em;
+      text-transform: uppercase;
+    }
+    #pta-panel .pta-log-time {
+      color: var(--pta-faint);
+      font-size: 9px;
+      white-space: nowrap;
+    }
+    #pta-panel .pta-log-message {
+      margin-top: 4px;
+      font-size: 10px;
+      font-weight: 700;
+      line-height: 1.4;
+    }
+    #pta-panel .pta-log-details {
+      margin-top: 4px;
+      color: var(--pta-muted);
+      font-size: 9px;
+      line-height: 1.45;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+    #pta-panel .pta-log-empty {
+      padding: 20px 12px;
+      border: 1px dashed var(--pta-border);
+      border-radius: 12px;
+      color: var(--pta-muted);
+      text-align: center;
+      font-size: 10px;
+    }
+
     #pta-panel .pta-footer {
       margin-top: 10px;
       color: #526174;
@@ -7662,6 +8064,25 @@ GM_addStyle(`
         return;
       }
 
+      if (action === 'view-dashboard') {
+        state.panelView = 'dashboard';
+        saveState(state);
+        updatePanel();
+        return;
+      }
+
+      if (action === 'view-logs') {
+        state.panelView = 'logs';
+        saveState(state);
+        updatePanel();
+        return;
+      }
+
+      if (action === 'clear-logs') {
+        clearActionLog();
+        return;
+      }
+
       if (action === 'capture-reserve-dec') {
         stepCaptureSetting('minBallReserve', -1, 0, 99);
         return;
@@ -7761,7 +8182,7 @@ GM_addStyle(`
 
     // updatePanel() reconstruit le contenu régulièrement. Sans conserver ces
     // valeurs, le navigateur remet le conteneur en haut à chaque rafraîchissement.
-    const previousBody = panel.querySelector('.pta-body');
+    const previousBody = panel.querySelector('.pta-body:not([hidden])');
     const previousScrollTop = previousBody?.scrollTop || 0;
     const hadRenderedBody = Boolean(previousBody);
 
@@ -7776,6 +8197,29 @@ GM_addStyle(`
 
     const current = moduleFromLocation();
     const next = nextDueModule();
+    const panelView = state.panelView === 'logs' ? 'logs' : 'dashboard';
+    const logEntries = actionLogEntries();
+    const logsHtml = logEntries.length
+      ? logEntries.map(entry => {
+          const time = new Date(entry.at || 0).toLocaleTimeString('fr-FR', {
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+          });
+          return `
+            <article class="pta-log-entry" data-level="${escapeHtml(entry.level || 'info')}">
+              <div class="pta-log-entry-head">
+                <span class="pta-log-category">${escapeHtml(entry.category || 'bot')}</span>
+                <span class="pta-log-time">${escapeHtml(time)}</span>
+              </div>
+              <div class="pta-log-message">${escapeHtml(entry.message || '')}</div>
+              ${entry.details ? `
+                <div class="pta-log-details">${escapeHtml(entry.details)}</div>
+              ` : ''}
+            </article>
+          `;
+        }).join('')
+      : '<div class="pta-log-empty">Aucune action enregistrée pour le moment.</div>';
     const cycleMeta = expeditionPhaseMeta(expeditionCycle().phase);
     const decision = panelNextDecision();
     const account = accountSnapshot();
@@ -7993,7 +8437,24 @@ GM_addStyle(`
         >${config.panelCollapsed ? '▣' : '—'}</button>
       </div>
 
-      <div class="pta-body">
+      <div class="pta-tabs" role="tablist" aria-label="Navigation du panel">
+        <button
+          class="pta-tab-btn"
+          data-action="view-dashboard"
+          data-active="${panelView === 'dashboard'}"
+          role="tab"
+          aria-selected="${panelView === 'dashboard'}"
+        >Pilotage</button>
+        <button
+          class="pta-tab-btn"
+          data-action="view-logs"
+          data-active="${panelView === 'logs'}"
+          role="tab"
+          aria-selected="${panelView === 'logs'}"
+        >Logs <span class="pta-tab-count">${logEntries.length}</span></button>
+      </div>
+
+      <div class="pta-body" data-panel-page="dashboard" ${panelView === 'logs' ? 'hidden' : ''}>
         <section class="pta-status-hero" aria-label="État de l’automatisation">
           <div class="pta-status-top">
             <div>
@@ -8448,12 +8909,25 @@ GM_addStyle(`
           Goal Planner v0.9 · GitHub Raw · actions destructrices bloquées
         </div>
       </div>
+
+      <div class="pta-body pta-log-page" data-panel-page="logs" ${panelView === 'dashboard' ? 'hidden' : ''}>
+        <div class="pta-log-toolbar">
+          <div class="pta-log-toolbar-copy">
+            <strong>Journal d’actions</strong>
+            <small>${logEntries.length} entrée${logEntries.length > 1 ? 's' : ''} · 120 maximum</small>
+          </div>
+          <button class="pta-log-clear" data-action="clear-logs">Vider</button>
+        </div>
+        <div class="pta-log-list">
+          ${logsHtml}
+        </div>
+      </div>
     `;
 
     // Restaurer immédiatement la position de lecture après le remplacement du
     // DOM. Le premier rendu reste naturellement positionné en haut.
     if (hadRenderedBody) {
-      const nextBody = panel.querySelector('.pta-body');
+      const nextBody = panel.querySelector('.pta-body:not([hidden])');
       if (nextBody) {
         nextBody.scrollTop = Math.min(
           previousScrollTop,
