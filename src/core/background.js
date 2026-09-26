@@ -260,6 +260,211 @@ async function backgroundObserveExpeditions() {
   return { acted: false, page, active: null };
 }
 
+function detachedCaptureDecision(root) {
+  const form = root.querySelector('form[data-capture-form]');
+  if (!form) return null;
+
+  const encounter = form.closest('.mission-encounter, section, article') || form;
+  const text = normalizeText(encounter.textContent || '');
+  const species =
+    encounter.querySelector('.mission-encounter__identity h3, h3')?.textContent?.trim() ||
+    'Pokémon rencontré';
+
+  let isNew = null;
+  if (/absente? du pokedex|nouvelle espece|premiere capture|jamais capture|new species/.test(text)) {
+    isNew = true;
+  } else if (/presente? dans le pokedex|deja capture|already caught|already owned/.test(text)) {
+    isNew = false;
+  }
+
+  const rarity =
+    text.match(/\b(commun|peu commun|rare|epique|legendaire|mythique|common|uncommon|epic|legendary|mythic)\b/)?.[1] ||
+    '';
+
+  const ivRaw = text.match(/(?:iv|ivs)[^\d]{0,12}(\d+(?:[.,]\d+)?)/i)?.[1];
+  const ivScore = parseNumber(ivRaw);
+
+  const checked = form.querySelector('input[name="ball_code"]:checked');
+  const label = checked?.closest('label');
+  const selected = form.querySelector('[data-capture-select-value], .capture-select__value');
+  const countText =
+    label?.querySelector('strong')?.textContent ||
+    selected?.querySelector('strong')?.textContent ||
+    '';
+  const countMatch = countText.match(/\d+/);
+  const ballReserve = countMatch ? Number(countMatch[0]) : null;
+
+  const chanceText = form.querySelector('[data-capture-chance], .capture-chance')?.textContent || '';
+  const chanceMatch = chanceText.match(/(\d+(?:[.,]\d+)?)\s*%/);
+  const captureChance = chanceMatch ? parseNumber(chanceMatch[1]) : null;
+
+  const attemptsText = encounter.querySelector('.mission-encounter__attempts')?.textContent || '';
+  const attemptsMatch = attemptsText.match(/(\d+)\s*(?:tentative|tentatives|attempt|attempts)/i);
+  const attemptsRemaining = attemptsMatch ? Number(attemptsMatch[1]) : null;
+
+  let action = 'manual';
+  let reason = 'Capture auto désactivée';
+
+  if (config.autoCapture) {
+    if (
+      ballReserve != null &&
+      ballReserve <= config.minBallReserve
+    ) {
+      action = 'ignore';
+      reason = `Réserve protégée · ${ballReserve}/${config.minBallReserve}`;
+    } else if (!config.smartCapture) {
+      action = 'capture';
+      reason = captureChance != null
+        ? `Capture auto simple · ${captureChance}%`
+        : 'Capture auto simple';
+    } else if (config.captureNewSpecies && isNew === true) {
+      action = 'capture';
+      reason = captureChance != null
+        ? `Nouvelle espèce · ${captureChance}%`
+        : 'Nouvelle espèce';
+    } else if (
+      config.captureRare &&
+      /rare|epique|legendaire|mythique|epic|legendary|mythic/.test(rarity)
+    ) {
+      action = 'capture';
+      reason = `Rareté · ${rarity}`;
+    } else if (
+      ivScore != null &&
+      ivScore >= config.minCaptureIvScore &&
+      ivScore <= 100
+    ) {
+      action = 'capture';
+      reason = `IV ${ivScore} ≥ ${config.minCaptureIvScore}`;
+    } else if (config.captureUnknownEncounters && isNew == null) {
+      action = 'capture';
+      reason = 'Rencontre inconnue autorisée';
+    } else {
+      action = 'ignore';
+      reason = isNew === false
+        ? 'Doublon non prioritaire'
+        : 'Aucun critère intelligent validé';
+    }
+  }
+
+  return {
+    form,
+    species,
+    isNew,
+    rarity,
+    ivScore,
+    ballReserve,
+    captureChance,
+    attemptsRemaining,
+    action,
+    reason,
+  };
+}
+
+function recordDetachedExpeditionOutcome(root, pathname) {
+  if (!pathname || state.lastRecordedResultUrl === pathname) return;
+
+  const text = normalizeText(root.body?.textContent || '');
+  const failure = /echec|echouee|echoue|defaite|failed|failure|lost/.test(text);
+  const success = /reussite|reussie|victoire|success|completed|terminee avec succes/.test(text);
+
+  if (!failure && !success) return;
+
+  const title = normalizeText(
+    root.querySelector('.page-header h1, main h1, main h2')?.textContent ||
+    expeditionCycle().title ||
+    'expedition'
+  );
+
+  const previous = state.expeditionStats?.[title] || {
+    attempts: 0,
+    successes: 0,
+    failures: 0,
+    failureStreak: 0,
+  };
+
+  state.expeditionStats = {
+    ...(state.expeditionStats || {}),
+    [title]: {
+      attempts: previous.attempts + 1,
+      successes: previous.successes + (success && !failure ? 1 : 0),
+      failures: previous.failures + (failure ? 1 : 0),
+      failureStreak: failure ? previous.failureStreak + 1 : 0,
+      lastOutcome: failure ? 'failure' : 'success',
+      lastOutcomeAt: now(),
+    },
+  };
+  state.lastRecordedResultUrl = pathname;
+  saveState(state);
+}
+
+async function backgroundHandleExpeditionResult(active) {
+  if (!active?.resultUrl) return false;
+
+  const page = await fetchObservedPage(active.resultUrl, {
+    cacheMs: 0,
+    force: true,
+  });
+  if (!page) return false;
+
+  recordDetachedExpeditionOutcome(page.doc, page.pathname);
+
+  const capture = detachedCaptureDecision(page.doc);
+  if (capture) {
+    state.captureDecision = {
+      action: capture.action,
+      reason: capture.reason,
+      species: capture.species,
+      isNew: capture.isNew,
+      rarity: capture.rarity,
+      ivScore: capture.ivScore,
+      ballName: null,
+      ballCode: capture.form.querySelector('input[name="ball_code"]:checked')?.value || null,
+      ballReserve: capture.ballReserve,
+      captureChance: capture.captureChance,
+      attemptsRemaining: capture.attemptsRemaining,
+      updatedAt: now(),
+    };
+    saveState(state);
+    updatePanel();
+
+    if (capture.action === 'capture') {
+      const submitted = await submitObservedForm(
+        capture.form,
+        `Capture arrière-plan: ${capture.species} — ${capture.reason}`,
+        {
+          expectedKind: 'capture',
+          navigate: false,
+          moduleId: 'expeditions',
+        }
+      );
+      if (submitted) return true;
+    }
+  }
+
+  const text = normalizeText(page.doc.body?.textContent || '');
+  const rewardsRecovered =
+    Boolean(page.doc.querySelector('.result-claimed')) ||
+    /recompenses recuperees|recompense recuperee|status badge success.*recuperee/.test(text);
+
+  if (rewardsRecovered) {
+    setExpeditionPhase('ready_to_start', {
+      title: null,
+      resultUrl: null,
+      dueAt: null,
+    });
+    return false;
+  }
+
+  // Contrat serveur inconnu : conserver le fallback visible pour ne pas
+  // inventer une action de récupération.
+  setExpeditionPhase('due', {
+    title: active.title,
+    resultUrl: active.resultUrl,
+    dueAt: active.dueAt,
+  });
+  return false;
+}
+
 async function backgroundStartExpedition(expeditionPage) {
   if (!config.autoStartExpeditions || !expeditionPage?.doc) return false;
 
@@ -646,6 +851,17 @@ async function runBackgroundAutomation() {
   backgroundMarkSweep();
 
   const expeditionObservation = await backgroundObserveExpeditions();
+
+  if (
+    expeditionObservation.active &&
+    expeditionCycle().phase === 'due'
+  ) {
+    const resultAction = await backgroundHandleExpeditionResult(
+      expeditionObservation.active
+    );
+    if (resultAction) return true;
+  }
+
   const leaguePage = await fetchObservedPage('/league', { cacheMs: 6000 });
   if (leaguePage) {
     const info = detachedLeagueInfo(leaguePage.doc);
@@ -658,6 +874,14 @@ async function runBackgroundAutomation() {
   if (plan.step?.module === 'progression') {
     const gymAction = await backgroundHandleLeague();
     if (gymAction) return true;
+
+    const refreshedAfterGym = refreshGoalPlan(accountSnapshot());
+    if (
+      refreshedAfterGym.step?.module === 'healing' ||
+      gymCycle().needsHealing
+    ) {
+      return false;
+    }
   }
 
   if (
