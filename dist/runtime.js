@@ -2,7 +2,7 @@
 (() => {
   'use strict';
 
-  const VERSION = "0.8.7";
+  const VERSION = "0.9.0";
 
 // ---- src/core/config.js ----
 const STORAGE_KEY = 'poketaka-automation:config';
@@ -23,6 +23,7 @@ const STORAGE_KEY = 'poketaka-automation:config';
     minGymHpPercent: 70,
     gymRetryMinutes: 30,
     strategy: 'progression',
+    goalPriorityBonus: 2400,
     minSuccessChance: 55,
     avoidLongLowValue: true,
     smartTeam: true,
@@ -174,6 +175,75 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
         blockedUntil: 0,
         lastCheckAt: 0,
         lastChallengeAt: 0,
+        challengeSubmittedDay: null,
+        completedDay: null,
+      },
+      accountSnapshot: {
+        version: 1,
+        observedAt: 0,
+        page: null,
+        trainer: { level: null },
+        roster: {
+          known: false,
+          capturedAt: 0,
+          count: 0,
+          healthyCount: 0,
+          averageLevel: null,
+          pokemon: [],
+        },
+        league: {
+          known: false,
+          badges: null,
+          totalBadges: 8,
+          dailyBattleAvailable: null,
+          arena: null,
+          champion: null,
+          badge: null,
+          phase: 'unknown',
+          needsHealing: false,
+          lockedGyms: [],
+        },
+        expeditions: {
+          phase: 'unknown',
+          activeTitle: null,
+          selectedTitle: null,
+          dueAt: null,
+          completedTitles: [],
+          locked: [],
+          failureStreaks: {},
+        },
+        pokedex: {
+          known: false,
+          capturedSpecies: null,
+          totalSpecies: null,
+        },
+        resources: {
+          known: false,
+          balls: null,
+        },
+        sources: [],
+      },
+      goalPlan: {
+        version: 1,
+        generatedAt: 0,
+        strategy: 'progression',
+        primary: {
+          id: 'idle',
+          title: 'Observer le compte',
+          reason: 'Pas encore assez de contexte.',
+          module: null,
+          target: null,
+        },
+        step: {
+          id: 'observe',
+          title: 'Collecter l’état du compte',
+          reason: 'Le planner attend davantage de données.',
+          module: null,
+          action: 'observe',
+          target: null,
+        },
+        blockers: [],
+        confidence: 'low',
       },
       orchestrator: {
         lastDecision: null,
@@ -824,6 +894,8 @@ function gymCycle() {
       blockedUntil: 0,
       lastCheckAt: 0,
       lastChallengeAt: 0,
+      challengeSubmittedDay: null,
+      completedDay: null,
     };
   }
   return state.gymCycle;
@@ -1053,6 +1125,9 @@ function leagueNeedsDailyCheck() {
   const gym = gymCycle();
   const today = localDayKey();
 
+  if (gym.completedDay === today) return false;
+  if (gym.challengeSubmittedDay === today) return false;
+
   if (gym.phase === 'blocked' && gym.blockedUntil && gym.blockedUntil > now()) {
     return false;
   }
@@ -1067,6 +1142,9 @@ function leagueNeedsDailyCheck() {
 
 function leagueAttentionReason() {
   const gym = gymCycle();
+  if (gym.completedDay === localDayKey()) {
+    return null;
+  }
   if (gym.availableToday === true) {
     return gym.arena
       ? `combat d’arène disponible: ${gym.arena}`
@@ -1082,21 +1160,24 @@ async function handleLeagueAutomation() {
   if (!config.autoGyms) return false;
 
   if (isGymResultLikePage()) {
+    state.gymCycle = {
+      ...gymCycle(),
+      phase: 'result',
+      checkedDay: localDayKey(),
+      availableToday: false,
+      completedDay: localDayKey(),
+      reason: 'Combat résolu — combat quotidien consommé',
+      lastCheckAt: now(),
+    };
+    saveState(state);
+    updatePanel();
+
     const returnLink = gymReturnToCircuitLink();
     if (!returnLink) return false;
 
     if (now() - (gymCycle().lastChallengeAt || 0) < 2500) {
       return false;
     }
-
-    state.gymCycle = {
-      ...gymCycle(),
-      phase: 'result',
-      reason: 'Combat résolu — retour au Circuit pour actualiser la progression',
-      lastCheckAt: now(),
-    };
-    saveState(state);
-    updatePanel();
 
     return clickElement(returnLink, 'Arène: retour au Circuit');
   }
@@ -1106,6 +1187,21 @@ async function handleLeagueAutomation() {
     const dailyAvailable = leagueDailyStatus();
     const progress = parseGymProgress();
     const gym = availableGymContext();
+
+    if (
+      gymCycle().completedDay === today ||
+      gymCycle().challengeSubmittedDay === today
+    ) {
+      setGymCycle('done', {
+        checkedDay: today,
+        availableToday: false,
+        badges: progress.badges,
+        totalBadges: progress.totalBadges,
+        completedDay: today,
+        reason: 'Combat d’arène déjà tenté aujourd’hui — nouvelle tentative bloquée',
+      });
+      return false;
+    }
 
     if (dailyAvailable === false) {
       setGymCycle('done', {
@@ -1226,6 +1322,7 @@ async function handleLeagueAutomation() {
       teamScore: assessment.plan.teamScore,
       reason: `Défi lancé avec ${assessment.plan.team.map(pokemon => pokemon.name).join(', ')}`,
       lastChallengeAt: now(),
+      challengeSubmittedDay: localDayKey(),
     };
     saveState(state);
     updatePanel();
@@ -1237,6 +1334,935 @@ async function handleLeagueAutomation() {
   }
 
   return false;
+}
+
+// ---- src/account/snapshot.js ----
+function emptyAccountSnapshot() {
+  return {
+    version: 1,
+    observedAt: 0,
+    page: null,
+    trainer: {
+      level: null,
+    },
+    roster: {
+      known: false,
+      capturedAt: 0,
+      count: 0,
+      healthyCount: 0,
+      averageLevel: null,
+      pokemon: [],
+    },
+    league: {
+      known: false,
+      badges: null,
+      totalBadges: 8,
+      dailyBattleAvailable: null,
+      arena: null,
+      champion: null,
+      badge: null,
+      phase: 'unknown',
+      needsHealing: false,
+      lockedGyms: [],
+    },
+    expeditions: {
+      phase: 'unknown',
+      activeTitle: null,
+      selectedTitle: null,
+      dueAt: null,
+      completedTitles: [],
+      locked: [],
+      failureStreaks: {},
+    },
+    pokedex: {
+      known: false,
+      capturedSpecies: null,
+      totalSpecies: null,
+    },
+    resources: {
+      known: false,
+      balls: null,
+    },
+    sources: [],
+  };
+}
+
+function accountSnapshot() {
+  if (!state.accountSnapshot || typeof state.accountSnapshot !== 'object') {
+    state.accountSnapshot = emptyAccountSnapshot();
+  }
+  return state.accountSnapshot;
+}
+
+function missionHubProgress() {
+  const root = document.querySelector('.mission-hub__progress');
+  if (!root) return null;
+
+  const result = {
+    trainerLevel: null,
+    capturedSpecies: null,
+  };
+
+  root.querySelectorAll(':scope > div').forEach(row => {
+    const label = normalizeText(row.querySelector('span')?.textContent || '');
+    const value = parseNumber(row.querySelector('strong')?.textContent);
+
+    if (value == null) return;
+    if (label === 'niveau' || label.includes('niveau dresseur')) {
+      result.trainerLevel = value;
+    }
+    if (label.includes('especes capturees')) {
+      result.capturedSpecies = value;
+    }
+  });
+
+  return result;
+}
+
+function parseTrainerLevelFromDom() {
+  const hub = missionHubProgress();
+  if (hub?.trainerLevel != null) return hub.trainerLevel;
+
+  const direct = document.querySelector(
+    '[data-trainer-level], .trainer-level, .trainer-profile__level, .profile-level'
+  );
+
+  if (direct) {
+    const raw =
+      direct.getAttribute('data-trainer-level') ||
+      direct.textContent ||
+      '';
+    const match = String(raw).match(/\d+/);
+    if (match) return Number(match[0]);
+  }
+
+  const profile = document.querySelector('.trainer-file, [data-trainer-profile]');
+  if (profile) {
+    const text = normalizeText(profile.textContent || '');
+    const match = text.match(/(?:niveau|niv|level|lvl)\s*[:.-]?\s*(\d+)/i);
+    if (match) return Number(match[1]);
+  }
+
+  return null;
+}
+
+function parsePokedexProgressFromDom() {
+  const hub = missionHubProgress();
+  if (hub?.capturedSpecies != null) {
+    return {
+      capturedSpecies: hub.capturedSpecies,
+      totalSpecies: null,
+    };
+  }
+
+  const root = document.querySelector(
+    '[data-pokedex-progress], .pokedex-progress, .dex-progress'
+  );
+  if (!root) return null;
+
+  const raw =
+    root.getAttribute('data-pokedex-progress') ||
+    root.getAttribute('aria-label') ||
+    root.textContent ||
+    '';
+
+  const match = String(raw).match(/(\d+)\s*\/\s*(\d+)/);
+  if (!match) return null;
+
+  return {
+    capturedSpecies: Number(match[1]),
+    totalSpecies: Number(match[2]),
+  };
+}
+
+function parseLeagueRequirement(text) {
+  const raw = String(text || '').trim();
+  const normalized = normalizeText(raw);
+
+  let match = normalized.match(/terminer l expedition\s*:?\s*(.+)$/i);
+  if (match) {
+    return {
+      type: 'expedition',
+      target: match[1].trim(),
+      label: raw,
+    };
+  }
+
+  match = normalized.match(/obtenir\s*:?\s*(badge\s+.+)$/i);
+  if (match) {
+    return {
+      type: 'badge',
+      target: match[1].trim(),
+      label: raw,
+    };
+  }
+
+  match = normalized.match(/(?:niveau|niv|level)\s*(?:dresseur|trainer)?\s*:?\s*(\d+)/i);
+  if (match) {
+    return {
+      type: 'trainer_level',
+      target: Number(match[1]),
+      label: raw,
+    };
+  }
+
+  return {
+    type: 'unknown',
+    target: raw,
+    label: raw,
+  };
+}
+
+function parseLockedGymsFromDom() {
+  if (!/^\/league\/?$/.test(location.pathname)) return null;
+
+  return [...document.querySelectorAll('.gym-card--locked')].map((card, index) => {
+    const identity = card.querySelector('.gym-card__identity');
+    const requirements = [...card.querySelectorAll('.gym-requirements p')]
+      .map(node => parseLeagueRequirement(node.textContent || ''))
+      .filter(requirement => requirement.label);
+
+    return {
+      rank:
+        parseNumber(card.querySelector('.gym-rank')?.textContent?.match(/\d+/)?.[0]) ||
+        index + 1,
+      arena:
+        identity?.querySelector('h3')?.textContent?.trim() ||
+        card.querySelector('h3')?.textContent?.trim() ||
+        `Arène ${index + 1}`,
+      champion:
+        [...(identity?.querySelectorAll('p') || [])]
+          .map(node => node.textContent?.trim() || '')
+          .find(text => /^champion\s*:/i.test(text))
+          ?.replace(/^champion\s*:\s*/i, '') ||
+        null,
+      badge:
+        identity?.querySelector('.card-label')?.textContent?.trim() ||
+        card.querySelector('.card-label')?.textContent?.trim() ||
+        null,
+      requirements,
+    };
+  });
+}
+
+function rosterSnapshotForAccount() {
+  const roster = state.rosterSnapshot;
+  if (!roster?.capturedAt || !Array.isArray(roster.pokemon)) {
+    return {
+      known: false,
+      capturedAt: 0,
+      count: 0,
+      healthyCount: 0,
+      averageLevel: null,
+      pokemon: [],
+    };
+  }
+
+  const pokemon = roster.pokemon.map(entry => ({
+    id: entry.id,
+    name: entry.name,
+    level: entry.level,
+    hpPercent: entry.hpPercent,
+    types: Array.isArray(entry.types) ? entry.types : [],
+  }));
+
+  const healthy = pokemon.filter(entry =>
+    Number(entry.hpPercent || 0) >= config.minTeamHpPercent
+  );
+
+  return {
+    known: pokemon.length > 0,
+    capturedAt: roster.capturedAt,
+    count: pokemon.length,
+    healthyCount: healthy.length,
+    averageLevel: pokemon.length
+      ? Math.round(
+          pokemon.reduce((sum, entry) => sum + Number(entry.level || 0), 0) /
+          pokemon.length
+        )
+      : null,
+    pokemon,
+  };
+}
+
+function parseExpeditionLockRequirement(text, previousTitle = null) {
+  const raw = String(text || '').trim();
+  const normalized = normalizeText(raw);
+
+  let match = normalized.match(/niveau de dresseur requis\s*:?\s*(\d+)/i);
+  if (match) {
+    return { type: 'trainer_level', target: Number(match[1]), label: raw };
+  }
+
+  match = normalized.match(/especes capturees requises\s*:?\s*(\d+)/i);
+  if (match) {
+    return { type: 'captured_species', target: Number(match[1]), label: raw };
+  }
+
+  match = normalized.match(/badges requis\s*:?\s*(\d+)/i);
+  if (match) {
+    return { type: 'badges', target: Number(match[1]), label: raw };
+  }
+
+  if (/terminez d abord l expedition precedente|terminez l expedition precedente/.test(normalized)) {
+    return {
+      type: 'previous_expedition',
+      target: previousTitle ? normalizeText(previousTitle) : null,
+      label: raw,
+    };
+  }
+
+  return { type: 'unknown', target: raw, label: raw };
+}
+
+function parseLockedExpeditionsFromDom() {
+  if (!/^\/expeditions\/?$/.test(location.pathname)) return null;
+
+  const availableTitles = [
+    ...document.querySelectorAll(
+      '.mission-tabset__panel[data-panel="available"] article h3, [data-panel="available"] article h3'
+    ),
+  ]
+    .map(node => node.textContent?.trim())
+    .filter(Boolean);
+
+  const lockedCards = [
+    ...document.querySelectorAll('.mission-locked__grid article'),
+  ];
+
+  let previousTitle = availableTitles[availableTitles.length - 1] || null;
+
+  return lockedCards.map(card => {
+    const title = card.querySelector('h3')?.textContent?.trim() || 'Destination verrouillée';
+    const requirements = [...card.querySelectorAll('li')]
+      .map(node => parseExpeditionLockRequirement(node.textContent || '', previousTitle))
+      .filter(requirement => requirement.label);
+
+    const result = {
+      title,
+      normalizedTitle: normalizeText(title),
+      difficulty: card.querySelector('.mission-difficulty')?.textContent?.trim() || null,
+      requirements,
+    };
+
+    previousTitle = title;
+    return result;
+  });
+}
+
+function expeditionSnapshotForAccount() {
+  const cycle = expeditionCycle();
+  const failureStreaks = {};
+  const completed = new Set(
+    Array.isArray(state.accountSnapshot?.expeditions?.completedTitles)
+      ? state.accountSnapshot.expeditions.completedTitles
+      : []
+  );
+
+  for (const [title, stats] of Object.entries(state.expeditionStats || {})) {
+    const streak = Number(stats?.failureStreak || 0);
+    if (streak > 0) failureStreaks[title] = streak;
+    if (Number(stats?.successes || 0) > 0) completed.add(normalizeText(title));
+  }
+
+  if (/^\/expeditions\/?$/.test(location.pathname)) {
+    document.querySelectorAll('.mission-archives a strong').forEach(node => {
+      const title = normalizeText(node.textContent || '');
+      if (title) completed.add(title);
+    });
+  }
+
+  return {
+    phase: cycle.phase || 'unknown',
+    activeTitle: cycle.title || null,
+    selectedTitle: state.selectedExpedition || null,
+    dueAt: cycle.dueAt || null,
+    completedTitles: [...completed],
+    locked:
+      parseLockedExpeditionsFromDom() ??
+      state.accountSnapshot?.expeditions?.locked ??
+      [],
+    failureStreaks,
+  };
+}
+
+function leagueSnapshotForAccount(previous) {
+  const gym = typeof gymCycle === 'function'
+    ? gymCycle()
+    : (state.gymCycle || {});
+
+  const lockedGyms = parseLockedGymsFromDom();
+
+  return {
+    known:
+      previous?.known ||
+      gym.badges != null ||
+      gym.availableToday != null ||
+      /^\/league\/?$/.test(location.pathname),
+    badges: gym.badges ?? previous?.badges ?? null,
+    totalBadges: gym.totalBadges || previous?.totalBadges || 8,
+    dailyBattleAvailable:
+      gym.availableToday ?? previous?.dailyBattleAvailable ?? null,
+    arena: gym.arena ?? previous?.arena ?? null,
+    champion: gym.champion ?? previous?.champion ?? null,
+    badge: gym.badge ?? previous?.badge ?? null,
+    phase: gym.phase || previous?.phase || 'unknown',
+    needsHealing: Boolean(gym.needsHealing),
+    lockedGyms: lockedGyms ?? previous?.lockedGyms ?? [],
+  };
+}
+
+function observeAccountSnapshot() {
+  const previous = accountSnapshot();
+  const trainerLevel = parseTrainerLevelFromDom();
+  const pokedex = parsePokedexProgressFromDom();
+  const capture = state.captureDecision || {};
+  const sources = new Set(previous.sources || []);
+
+  sources.add(location.pathname);
+
+  const next = {
+    ...previous,
+    version: 1,
+    observedAt: now(),
+    page: location.pathname,
+    trainer: {
+      level: trainerLevel ?? previous.trainer?.level ?? null,
+    },
+    roster: rosterSnapshotForAccount(),
+    league: leagueSnapshotForAccount(previous.league),
+    expeditions: expeditionSnapshotForAccount(),
+    pokedex: pokedex
+      ? {
+          known: true,
+          capturedSpecies: pokedex.capturedSpecies,
+          totalSpecies: pokedex.totalSpecies ?? previous.pokedex?.totalSpecies ?? null,
+        }
+      : (previous.pokedex || emptyAccountSnapshot().pokedex),
+    resources: {
+      known:
+        capture.ballReserve != null ||
+        previous.resources?.known ||
+        false,
+      balls:
+        capture.ballReserve ??
+        previous.resources?.balls ??
+        null,
+    },
+    sources: [...sources].slice(-20),
+  };
+
+  state.accountSnapshot = next;
+  saveState(state);
+  return next;
+}
+
+function accountSnapshotAgeMs() {
+  const snapshot = accountSnapshot();
+  return snapshot.observedAt ? now() - snapshot.observedAt : Infinity;
+}
+
+// ---- src/planner/goals.js ----
+function emptyGoalPlan() {
+  return {
+    version: 1,
+    generatedAt: 0,
+    strategy: 'progression',
+    primary: {
+      id: 'idle',
+      title: 'Observer le compte',
+      reason: 'Pas encore assez de contexte pour choisir un objectif.',
+      module: null,
+      target: null,
+    },
+    step: {
+      id: 'observe',
+      title: 'Collecter l’état du compte',
+      reason: 'Le planner attend davantage de données observées.',
+      module: null,
+      action: 'observe',
+      target: null,
+    },
+    blockers: [],
+    confidence: 'low',
+  };
+}
+
+function currentGoalPlan() {
+  if (!state.goalPlan || typeof state.goalPlan !== 'object') {
+    state.goalPlan = emptyGoalPlan();
+  }
+  return state.goalPlan;
+}
+
+function hasCompletedExpedition(snapshot, title) {
+  if (!title) return false;
+  const target = normalizeText(title);
+  return (snapshot.expeditions?.completedTitles || [])
+    .some(completed => normalizeText(completed) === target);
+}
+
+function requirementSatisfied(snapshot, requirement) {
+  if (!requirement) return false;
+
+  if (requirement.type === 'trainer_level') {
+    const level = snapshot.trainer?.level;
+    return level != null && level >= Number(requirement.target || 0);
+  }
+
+  if (requirement.type === 'captured_species') {
+    const count = snapshot.pokedex?.capturedSpecies;
+    return count != null && count >= Number(requirement.target || 0);
+  }
+
+  if (requirement.type === 'badges') {
+    const badges = snapshot.league?.badges;
+    return badges != null && badges >= Number(requirement.target || 0);
+  }
+
+  if (requirement.type === 'previous_expedition') {
+    return requirement.target
+      ? hasCompletedExpedition(snapshot, requirement.target)
+      : false;
+  }
+
+  if (requirement.type === 'expedition') {
+    return hasCompletedExpedition(snapshot, requirement.target);
+  }
+
+  if (requirement.type === 'badge') {
+    const badges = snapshot.league?.badges;
+    return badges != null && badges > 0;
+  }
+
+  return false;
+}
+
+function lockedExpedition(snapshot, title) {
+  const target = normalizeText(title || '');
+  return (snapshot.expeditions?.locked || [])
+    .find(entry => normalizeText(entry.title || entry.normalizedTitle) === target) || null;
+}
+
+function firstUnmetRequirement(snapshot, requirements = []) {
+  return requirements.find(requirement => !requirementSatisfied(snapshot, requirement)) || null;
+}
+
+function expeditionDependencyStep(snapshot, targetTitle) {
+  const locked = lockedExpedition(snapshot, targetTitle);
+
+  if (!locked) {
+    return {
+      id: 'complete-expedition',
+      title: `Terminer ${targetTitle}`,
+      reason: 'Cette expédition est la prochaine dépendance de progression.',
+      module: 'expeditions',
+      action: 'complete_expedition',
+      target: targetTitle,
+    };
+  }
+
+  const unmet = firstUnmetRequirement(snapshot, locked.requirements);
+
+  if (!unmet) {
+    return {
+      id: 'unlock-expedition',
+      title: `Lancer ${locked.title}`,
+      reason: 'Toutes les conditions observées sont satisfaites.',
+      module: 'expeditions',
+      action: 'complete_expedition',
+      target: locked.title,
+    };
+  }
+
+  if (unmet.type === 'trainer_level') {
+    const current = snapshot.trainer?.level;
+    return {
+      id: 'raise-trainer-level',
+      title: `Atteindre le niveau dresseur ${unmet.target}`,
+      reason: current == null
+        ? `${locked.title} exige le niveau ${unmet.target}.`
+        : `${locked.title} exige le niveau ${unmet.target} · actuel ${current}.`,
+      module: 'expeditions',
+      action: 'farm_trainer_level',
+      target: Number(unmet.target),
+    };
+  }
+
+  if (unmet.type === 'captured_species') {
+    const current = snapshot.pokedex?.capturedSpecies;
+    return {
+      id: 'capture-species',
+      title: `Atteindre ${unmet.target} espèces capturées`,
+      reason: current == null
+        ? `${locked.title} demande ${unmet.target} espèces.`
+        : `${locked.title} demande ${unmet.target} espèces · actuel ${current}.`,
+      module: 'expeditions',
+      action: 'farm_captures',
+      target: Number(unmet.target),
+    };
+  }
+
+  if (unmet.type === 'badges') {
+    const current = snapshot.league?.badges;
+    return {
+      id: 'earn-badges',
+      title: `Obtenir ${unmet.target} badges`,
+      reason: current == null
+        ? `${locked.title} demande ${unmet.target} badges.`
+        : `${locked.title} demande ${unmet.target} badges · actuel ${current}.`,
+      module: 'progression',
+      action: 'earn_badges',
+      target: Number(unmet.target),
+    };
+  }
+
+  if (unmet.type === 'previous_expedition' && unmet.target) {
+    return expeditionDependencyStep(snapshot, unmet.target);
+  }
+
+  return {
+    id: 'inspect-expedition-lock',
+    title: `Débloquer ${locked.title}`,
+    reason: unmet.label || 'Une condition de déblocage reste à satisfaire.',
+    module: 'expeditions',
+    action: 'inspect_unlock',
+    target: locked.title,
+  };
+}
+
+function nextLockedGym(snapshot) {
+  const gyms = [...(snapshot.league?.lockedGyms || [])]
+    .sort((a, b) => Number(a.rank || 0) - Number(b.rank || 0));
+
+  if (!gyms.length) return null;
+
+  const badges = Number(snapshot.league?.badges || 0);
+  return gyms.find(gym => Number(gym.rank || 0) > badges) || gyms[0];
+}
+
+function gymProgressionGoal(snapshot) {
+  const league = snapshot.league || {};
+  const gymState = typeof gymCycle === 'function' ? gymCycle() : (state.gymCycle || {});
+  const today = typeof localDayKey === 'function' ? localDayKey() : null;
+
+  if (
+    league.dailyBattleAvailable === true &&
+    (
+      !today ||
+      (
+        gymState.completedDay !== today &&
+        gymState.challengeSubmittedDay !== today
+      )
+    )
+  ) {
+    const arena = league.arena || 'l’arène disponible';
+    const badge = league.badge || 'le prochain badge';
+
+    if (league.needsHealing || gymState.needsHealing) {
+      return {
+        primary: {
+          id: 'win-current-gym',
+          title: `Obtenir ${badge}`,
+          reason: `${arena} est disponible aujourd’hui.`,
+          module: 'progression',
+          target: arena,
+        },
+        step: {
+          id: 'heal-for-gym',
+          title: 'Soigner l’équipe d’arène',
+          reason: 'Le combat quotidien ne doit pas être consommé avec une équipe trop blessée.',
+          module: 'healing',
+          action: 'heal',
+          target: arena,
+        },
+        blockers: ['PV insuffisants pour l’équipe d’arène'],
+        confidence: 'high',
+      };
+    }
+
+    return {
+      primary: {
+        id: 'win-current-gym',
+        title: `Obtenir ${badge}`,
+        reason: `${arena} est disponible et le combat quotidien n’est pas consommé.`,
+        module: 'progression',
+        target: arena,
+      },
+      step: {
+        id: 'challenge-gym',
+        title: `Défier ${league.champion || 'le Champion'}`,
+        reason: 'Le combat d’arène est l’action de progression prioritaire disponible aujourd’hui.',
+        module: 'progression',
+        action: 'challenge_gym',
+        target: arena,
+      },
+      blockers: [],
+      confidence: 'high',
+    };
+  }
+
+  const locked = nextLockedGym(snapshot);
+  if (!locked) return null;
+
+  const expectedPreviousBadges = Math.max(0, Number(locked.rank || 1) - 1);
+  const unmet = (locked.requirements || []).find(requirement => {
+    if (
+      requirement.type === 'badge' &&
+      Number(snapshot.league?.badges || 0) >= expectedPreviousBadges
+    ) {
+      return false;
+    }
+    return !requirementSatisfied(snapshot, requirement);
+  }) || null;
+
+  if (!unmet) {
+    return {
+      primary: {
+        id: 'unlock-next-gym',
+        title: `Débloquer ${locked.arena}`,
+        reason: `${locked.badge || 'Le prochain badge'} est le prochain jalon de Ligue.`,
+        module: 'progression',
+        target: locked.arena,
+      },
+      step: {
+        id: 'refresh-league',
+        title: 'Actualiser le Circuit des Arènes',
+        reason: 'Les conditions connues semblent satisfaites ; il faut revalider le déblocage.',
+        module: 'progression',
+        action: 'refresh_league',
+        target: locked.arena,
+      },
+      blockers: [],
+      confidence: 'medium',
+    };
+  }
+
+  if (unmet.type === 'expedition') {
+    const step = expeditionDependencyStep(snapshot, unmet.target);
+    return {
+      primary: {
+        id: 'unlock-next-gym',
+        title: `Débloquer ${locked.arena}`,
+        reason: `${locked.arena} exige l’expédition ${unmet.target}.`,
+        module: 'progression',
+        target: locked.arena,
+      },
+      step,
+      blockers: [unmet.label],
+      confidence: 'high',
+    };
+  }
+
+  if (unmet.type === 'trainer_level') {
+    return {
+      primary: {
+        id: 'unlock-next-gym',
+        title: `Débloquer ${locked.arena}`,
+        reason: unmet.label,
+        module: 'progression',
+        target: locked.arena,
+      },
+      step: {
+        id: 'raise-trainer-level',
+        title: `Atteindre le niveau dresseur ${unmet.target}`,
+        reason: unmet.label,
+        module: 'expeditions',
+        action: 'farm_trainer_level',
+        target: Number(unmet.target),
+      },
+      blockers: [unmet.label],
+      confidence: 'high',
+    };
+  }
+
+  if (unmet.type === 'badge') {
+    return {
+      primary: {
+        id: 'unlock-next-gym',
+        title: `Débloquer ${locked.arena}`,
+        reason: unmet.label,
+        module: 'progression',
+        target: locked.arena,
+      },
+      step: {
+        id: 'earn-required-badge',
+        title: `Obtenir le badge requis`,
+        reason: unmet.label,
+        module: 'progression',
+        action: 'earn_badge',
+        target: unmet.target,
+      },
+      blockers: [unmet.label],
+      confidence: 'medium',
+    };
+  }
+
+  return {
+    primary: {
+      id: 'unlock-next-gym',
+      title: `Débloquer ${locked.arena}`,
+      reason: 'Une condition du prochain badge reste à remplir.',
+      module: 'progression',
+      target: locked.arena,
+    },
+    step: {
+      id: 'inspect-gym-requirement',
+      title: 'Compléter la condition de Ligue',
+      reason: unmet.label,
+      module: 'progression',
+      action: 'inspect_requirement',
+      target: unmet.target,
+    },
+    blockers: [unmet.label],
+    confidence: 'medium',
+  };
+}
+
+function defaultExpeditionGoal(snapshot) {
+  const expedition = snapshot.expeditions || {};
+
+  if (['due', 'result', 'claiming'].includes(expedition.phase)) {
+    return {
+      primary: {
+        id: 'progress-account',
+        title: 'Faire progresser le compte',
+        reason: 'Une expédition terminée doit être résolue avant de recalculer la suite.',
+        module: 'expeditions',
+        target: expedition.activeTitle,
+      },
+      step: {
+        id: 'resolve-expedition',
+        title: `Résoudre ${expedition.activeTitle || 'l’expédition'}`,
+        reason: 'Le résultat est disponible.',
+        module: 'expeditions',
+        action: 'resolve_expedition',
+        target: expedition.activeTitle,
+      },
+      blockers: [],
+      confidence: 'high',
+    };
+  }
+
+  if (expedition.phase === 'running') {
+    return {
+      primary: {
+        id: 'progress-account',
+        title: 'Faire progresser le compte',
+        reason: 'Une expédition est déjà en cours.',
+        module: 'expeditions',
+        target: expedition.activeTitle,
+      },
+      step: {
+        id: 'wait-expedition',
+        title: `Attendre ${expedition.activeTitle || 'l’expédition'}`,
+        reason: expedition.dueAt
+          ? `Retour prévu dans ${formatRemaining(expedition.dueAt)}.`
+          : 'Le bot reprendra à la résolution.',
+        module: null,
+        action: 'wait',
+        target: expedition.activeTitle,
+      },
+      blockers: [],
+      confidence: 'high',
+    };
+  }
+
+  const firstLocked = (expedition.locked || [])[0];
+  if (firstLocked) {
+    const step = expeditionDependencyStep(snapshot, firstLocked.title);
+    return {
+      primary: {
+        id: 'unlock-expedition',
+        title: `Débloquer ${firstLocked.title}`,
+        reason: 'C’est la prochaine destination verrouillée observée.',
+        module: 'expeditions',
+        target: firstLocked.title,
+      },
+      step,
+      blockers: firstUnmetRequirement(snapshot, firstLocked.requirements)
+        ? [firstUnmetRequirement(snapshot, firstLocked.requirements).label]
+        : [],
+      confidence: 'high',
+    };
+  }
+
+  return {
+    primary: {
+      id: 'progress-expeditions',
+      title: 'Avancer dans les expéditions',
+      reason: 'Aucun autre jalon bloquant n’est actuellement connu.',
+      module: 'expeditions',
+      target: null,
+    },
+    step: {
+      id: 'best-expedition',
+      title: 'Lancer la meilleure expédition disponible',
+      reason: 'Le moteur Smart Expedition choisira mission + équipe.',
+      module: 'expeditions',
+      action: 'best_expedition',
+      target: null,
+    },
+    blockers: [],
+    confidence: 'medium',
+  };
+}
+
+function buildGoalPlan(snapshot = accountSnapshot()) {
+  const base = {
+    version: 1,
+    generatedAt: now(),
+    strategy: config.strategy || 'progression',
+  };
+
+  if (config.strategy === 'progression') {
+    const gymGoal = gymProgressionGoal(snapshot);
+    if (gymGoal) return { ...base, ...gymGoal };
+    return { ...base, ...defaultExpeditionGoal(snapshot) };
+  }
+
+  return { ...base, ...defaultExpeditionGoal(snapshot) };
+}
+
+function refreshGoalPlan(snapshot = observeAccountSnapshot()) {
+  const plan = buildGoalPlan(snapshot);
+  state.goalPlan = plan;
+  saveState(state);
+  return plan;
+}
+
+function goalModulePriorityBonus(moduleId) {
+  const plan = currentGoalPlan();
+  if (!moduleId) return 0;
+  if (plan.step?.module === moduleId) return config.goalPriorityBonus;
+  if (plan.primary?.module === moduleId) return Math.round(config.goalPriorityBonus * 0.45);
+  return 0;
+}
+
+function goalCandidatePriorityBonus(candidateName) {
+  const map = {
+    expedition: 'expeditions',
+    heal: 'healing',
+    gym: 'progression',
+    progression: 'progression',
+    incubator: 'incubator',
+    breeding: 'breeding',
+    'greenhouse-harvest': 'greenhouse',
+    'greenhouse-plant': 'greenhouse',
+  };
+
+  const moduleId = candidateName?.startsWith('navigation:')
+    ? candidateName.slice('navigation:'.length)
+    : map[candidateName];
+
+  return goalModulePriorityBonus(moduleId);
+}
+
+function goalTargetExpedition() {
+  const plan = currentGoalPlan();
+  if (plan.step?.module !== 'expeditions') return null;
+  if (!['complete_expedition', 'unlock_expedition'].includes(plan.step?.action)) return null;
+  return plan.step.target || null;
 }
 
 // ---- src/features/expeditions/capture.js ----
@@ -2345,8 +3371,36 @@ async function startExpedition() {
   }
 
   let selected = ranking.find(item => !item.blocked) || ranking[0];
+  const goal = currentGoalPlan();
+  const targetExpedition = goalTargetExpedition();
 
-  if (config.strategy === 'progression') {
+  if (targetExpedition) {
+    const target = normalizeText(targetExpedition);
+    const exact = ranking.find(item =>
+      normalizeText(item.title) === target &&
+      !item.blocked &&
+      item.failureStreak < 2 &&
+      item.teamPlan.viable !== false
+    );
+
+    if (exact) {
+      selected = exact;
+    }
+  } else if (goal.step?.action === 'farm_captures') {
+    const captureCandidates = ranking
+      .filter(item => !item.blocked)
+      .filter(item => item.failureStreak < 2)
+      .filter(item => item.teamPlan.viable !== false)
+      .sort((a, b) => {
+        const chanceDelta = Number(b.chance || 0) - Number(a.chance || 0);
+        if (chanceDelta) return chanceDelta;
+        const durationA = a.durationMinutes ?? Infinity;
+        const durationB = b.durationMinutes ?? Infinity;
+        return durationA - durationB;
+      });
+
+    if (captureCandidates.length) selected = captureCandidates[0];
+  } else if (config.strategy === 'progression') {
     const candidates = expeditionProgressionCandidates(ranking);
     if (candidates.length) selected = candidates[0];
   }
@@ -2361,7 +3415,9 @@ async function startExpedition() {
     viability: selected.teamPlan.known
       ? (selected.teamPlan.viable ? 'viable' : 'blocked')
       : 'unknown',
-    reason: selected.teamPlan.reason,
+    reason: targetExpedition
+      ? `Objectif global: ${goal.step?.title} · ${selected.teamPlan.reason}`
+      : selected.teamPlan.reason,
     updatedAt: now(),
   };
   saveState(state);
@@ -2825,6 +3881,12 @@ function moduleEnabled(moduleId) {
         let score = 0;
         const reasons = [];
 
+        const goalBonus = goalModulePriorityBonus(module.id);
+        if (goalBonus > 0) {
+          score += goalBonus;
+          reasons.push(`objectif global: ${currentGoalPlan().step?.title || currentGoalPlan().primary?.title || module.label}`);
+        }
+
         if (linkHasReadySignal(anchor)) {
           score += 1000;
           reasons.push('indicateur prêt dans la navigation');
@@ -3013,7 +4075,21 @@ function moduleEnabled(moduleId) {
       });
     }
 
-    return plan.sort((a, b) => b.priority - a.priority);
+    return plan
+      .map(candidate => {
+        const goalBonus = candidate.name.startsWith('navigation:')
+          ? 0
+          : goalCandidatePriorityBonus(candidate.name);
+
+        if (!goalBonus) return candidate;
+
+        return {
+          ...candidate,
+          priority: candidate.priority + goalBonus,
+          reason: `${candidate.reason}, objectif: ${currentGoalPlan().step?.title || currentGoalPlan().primary?.title}`,
+        };
+      })
+      .sort((a, b) => b.priority - a.priority);
   }
 
   function recordOrchestratorDecision(candidate) {
@@ -3037,6 +4113,10 @@ function moduleEnabled(moduleId) {
       }
 
       recordCurrentModuleStatus();
+      const snapshot = observeAccountSnapshot();
+      const goal = refreshGoalPlan(snapshot);
+      log('Goal Planner:', goal.primary?.title, '→', goal.step?.title);
+
       const plan = orchestratorPlan();
 
       for (const candidate of plan) {
@@ -3395,6 +4475,50 @@ GM_addStyle(`
     #pta-panel .pta-badge.current { background: var(--pta-blue-soft); color: #bfdbfe; }
     #pta-panel .pta-badge.danger { background: var(--pta-red-soft); color: #fecaca; }
     #pta-panel .pta-badge.neutral { background: rgba(148,163,184,.10); color: #cbd5e1; }
+
+    #pta-panel .pta-goal-card {
+      margin-top: 9px;
+      padding: 12px;
+      border: 1px solid rgba(96,165,250,.22);
+      border-radius: 14px;
+      background: linear-gradient(145deg, rgba(96,165,250,.10), rgba(255,255,255,.025));
+    }
+    #pta-panel .pta-goal-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 9px;
+    }
+    #pta-panel .pta-goal-title {
+      margin-top: 3px;
+      font-size: 13px;
+      font-weight: 820;
+      letter-spacing: -.012em;
+    }
+    #pta-panel .pta-goal-reason {
+      margin-top: 4px;
+      color: var(--pta-muted);
+      font-size: 10px;
+      line-height: 1.45;
+    }
+    #pta-panel .pta-goal-step {
+      margin-top: 9px;
+      padding: 9px 10px;
+      border-radius: 10px;
+      background: rgba(96,165,250,.075);
+      border: 1px solid rgba(96,165,250,.14);
+    }
+    #pta-panel .pta-goal-step strong {
+      display: block;
+      font-size: 11px;
+    }
+    #pta-panel .pta-goal-step small {
+      display: block;
+      margin-top: 2px;
+      color: var(--pta-muted);
+      font-size: 9px;
+      line-height: 1.4;
+    }
 
     #pta-panel .pta-capture-card {
       margin-top: 9px;
@@ -4132,6 +5256,23 @@ GM_addStyle(`
     const next = nextDueModule();
     const cycleMeta = expeditionPhaseMeta(expeditionCycle().phase);
     const decision = panelNextDecision();
+    const account = accountSnapshot();
+    const goal = currentGoalPlan();
+    const goalConfidenceLabel = {
+      high: 'Confiance élevée',
+      medium: 'Confiance moyenne',
+      low: 'Confiance faible',
+    }[goal.confidence] || 'Planner';
+    const goalConfidenceTone = goal.confidence === 'high'
+      ? 'ready'
+      : goal.confidence === 'low'
+        ? 'wait'
+        : 'current';
+    const goalAccountChips = [
+      account.trainer?.level != null ? `Niv. dresseur · ${account.trainer.level}` : null,
+      account.pokedex?.capturedSpecies != null ? `Espèces · ${account.pokedex.capturedSpecies}` : null,
+      account.league?.badges != null ? `Badges · ${account.league.badges}/${account.league.totalBadges || 8}` : null,
+    ].filter(Boolean);
     const team = plannedTeamNames();
     const activeModules = MODULES.filter(module => moduleEnabled(module.id));
     const rosterCount = state.rosterSnapshot?.pokemon?.length || 0;
@@ -4157,6 +5298,7 @@ GM_addStyle(`
       opening_prepare: 'Ouverture',
       preparing: 'Préparation',
       challenging: 'Combat',
+      result: 'Résultat',
       blocked: 'Bloqué',
       done: 'Terminé',
     };
@@ -4326,6 +5468,42 @@ GM_addStyle(`
           </div>
         </div>
 
+        <section class="pta-goal-card" aria-label="Objectif global">
+          <div class="pta-goal-head">
+            <div>
+              <div class="pta-eyebrow">Objectif global · ${escapeHtml(goal.strategy || 'progression')}</div>
+              <div class="pta-goal-title" title="${escapeHtml(goal.primary?.title || '')}">
+                ${escapeHtml(goal.primary?.title || 'Observer le compte')}
+              </div>
+            </div>
+            <span class="pta-badge ${goalConfidenceTone}">
+              ${escapeHtml(goalConfidenceLabel)}
+            </span>
+          </div>
+
+          <div class="pta-goal-reason">
+            ${escapeHtml(goal.primary?.reason || 'Le planner construit la prochaine stratégie.')}
+          </div>
+
+          <div class="pta-goal-step">
+            <div class="pta-eyebrow">Étape suivante</div>
+            <strong>${escapeHtml(goal.step?.title || 'Collecter l’état du compte')}</strong>
+            <small>${escapeHtml(goal.step?.reason || '')}</small>
+          </div>
+
+          ${goalAccountChips.length ? `
+            <div class="pta-chip-row">
+              ${goalAccountChips.map(label => chipHtml(label)).join('')}
+            </div>
+          ` : ''}
+
+          ${Array.isArray(goal.blockers) && goal.blockers.length ? `
+            <div class="pta-chip-row">
+              ${goal.blockers.map(blocker => chipHtml(`Blocage · ${blocker}`, blocker)).join('')}
+            </div>
+          ` : ''}
+        </section>
+
         <section class="pta-mission" aria-label="Plan d’expédition">
           <div class="pta-mission-head">
             <div class="pta-mission-name" title="${escapeHtml(missionTitle)}">
@@ -4447,6 +5625,13 @@ GM_addStyle(`
           </summary>
           <div class="pta-modules">
             <div class="pta-module">
+              <span class="pta-mini-dot ${goalConfidenceTone}"></span>
+              <span class="pta-module-name">Goal Planner</span>
+              <span class="pta-module-status" title="${escapeHtml(goal.step?.reason || '')}">
+                ${escapeHtml(goal.step?.title || 'Observation')}
+              </span>
+            </div>
+            <div class="pta-module">
               <span class="pta-mini-dot current"></span>
               <span class="pta-module-name">Orchestrateur</span>
               <span class="pta-module-status" title="${escapeHtml(state.orchestrator?.lastReason || '')}">
@@ -4566,7 +5751,7 @@ GM_addStyle(`
         </details>
 
         <div class="pta-footer">
-          Smart Expedition · GitHub Raw · actions destructrices bloquées
+          Goal Planner v0.9 · GitHub Raw · actions destructrices bloquées
         </div>
       </div>
     `;
