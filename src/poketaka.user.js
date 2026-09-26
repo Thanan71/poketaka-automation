@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PokéTaka Automation
 // @namespace    https://github.com/Thanan71/poketaka-automation
-// @version      0.4.2
+// @version      0.4.3
 // @description  Assistant d'automatisation DOM pour PokéTaka : expéditions, récompenses, soins, serre et progression.
 // @author       Thanan71
 // @match        https://poketaka.fr/*
@@ -16,7 +16,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.4.2';
+  const VERSION = '0.4.3';
   const STORAGE_KEY = 'poketaka-automation:config';
   const STATE_KEY = 'poketaka-automation:state';
 
@@ -256,6 +256,11 @@
     return /^\/expeditions\/results\//.test(location.pathname);
   }
 
+  function isExpeditionPreparePage() {
+    const parts = location.pathname.split('/').filter(Boolean);
+    return parts.length === 3 && parts[0] === 'expeditions' && parts[2] === 'prepare';
+  }
+
   function activeExpeditionSnapshot() {
     if (!isExpeditionIndexPage()) return null;
 
@@ -472,10 +477,8 @@
         return false;
       }
 
-      if (['preparing', 'starting'].includes(cycleState.phase)) {
-        return handleExpeditionPreparation();
-      }
-
+      state.selectedExpedition = null;
+      state.selectedExpeditionScore = null;
       setExpeditionPhase('ready_to_start', {
         title: null,
         resultUrl: null,
@@ -533,7 +536,10 @@
       }
     }
 
-    if (cycleState.phase === 'preparing' || cycleState.phase === 'starting') {
+    if (isExpeditionPreparePage()) {
+      if (!['preparing', 'starting'].includes(cycleState.phase)) {
+        setExpeditionPhase('preparing');
+      }
       return handleExpeditionPreparation();
     }
 
