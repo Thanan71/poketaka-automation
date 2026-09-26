@@ -18,6 +18,7 @@ const MODULES = [
   'src/features/expeditions/cycle.js',
   'src/features/activities.js',
   'src/features/expeditions/catalog.js',
+  'src/core/background.js',
   'src/core/navigation.js',
   'src/ui/panel.js',
   'src/main.js',
