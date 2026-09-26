@@ -27,8 +27,12 @@ GM_registerMenuCommand('Activer / désactiver PokéTaka Automation', () => setEn
       expedition: item.title,
       score: item.score,
       chance: item.chance ?? '?',
-      niveauRequis: item.requiredLevel ?? '?',
-      niveauEquipe: item.teamLevel ?? '?',
+      niveauConseille: item.requiredLevel ?? '?',
+      equipe: item.teamPlan?.known
+        ? item.teamPlan.team.map(pokemon => pokemon.name).join(', ') || 'aucune'
+        : 'à confirmer',
+      equipeViable: item.teamPlan?.viable ?? '?',
+      scoreEquipe: item.teamPlan?.teamScore ?? '?',
       dureeMin: item.durationMinutes != null ? Math.round(item.durationMinutes) : '?',
       recompenses: item.rewardScore,
       nouvelle: item.newProgression,
