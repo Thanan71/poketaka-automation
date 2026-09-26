@@ -9,6 +9,7 @@ const MODULES = [
   'src/core/state.js',
   'src/core/dom.js',
   'src/features/expeditions/team.js',
+  'src/features/league/gyms.js',
   'src/features/expeditions/capture.js',
   'src/features/expeditions/cycle.js',
   'src/features/activities.js',
