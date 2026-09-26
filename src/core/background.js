@@ -424,6 +424,8 @@ async function backgroundObserveExpeditions({ force = false } = {}) {
     };
   }
 
+  resetCaptureDecision('expedition_index_without_pending_result');
+  clearExpeditionSelection('expedition_index_without_pending_result');
   setExpeditionPhase('ready_to_start', {
     title: null,
     resultUrl: null,
@@ -544,29 +546,6 @@ function recordDetachedExpeditionOutcome(root, pathname) {
   saveState(state);
 }
 
-function expeditionRewardClaimForm(root) {
-  return root.querySelector(
-    'form[method="POST"][action*="/expeditions/results/"][action$="/claim"]'
-  );
-}
-
-function expeditionRewardsRecovered(root) {
-  const claimForm = expeditionRewardClaimForm(root);
-  if (claimForm) return false;
-
-  const metas = [...root.querySelectorAll('.mission-rewards .mission-reward__meta')]
-    .map(node => normalizeText(node.textContent || ''))
-    .filter(Boolean);
-
-  if (!metas.length) {
-    return Boolean(root.querySelector('.result-claimed'));
-  }
-
-  return metas.every(meta =>
-    !/a recuperer|to claim|claimable|pending/.test(meta)
-  );
-}
-
 async function verifyBackgroundExpeditionClaim(resultUrl) {
   const page = await fetchObservedPage(resultUrl, {
     cacheMs: 0,
@@ -609,6 +588,7 @@ async function backgroundHandleExpeditionResult(active) {
   if (!page) return false;
 
   recordDetachedExpeditionOutcome(page.doc, page.pathname);
+  const resultState = reconcileExpeditionResultState(page.doc, 'background_result');
 
   const capture = detachedCaptureDecision(page.doc);
   if (capture) {
@@ -675,7 +655,9 @@ async function backgroundHandleExpeditionResult(active) {
     }
   }
 
-  if (expeditionRewardsRecovered(page.doc)) {
+  if (resultState.rewardsRecovered) {
+    resetCaptureDecision('result_recovered:background');
+    clearExpeditionSelection('result_recovered:background');
     setExpeditionPhase('ready_to_start', {
       title: null,
       resultUrl: null,
@@ -690,7 +672,7 @@ async function backgroundHandleExpeditionResult(active) {
     return false;
   }
 
-  const claimForm = expeditionRewardClaimForm(page.doc);
+  const claimForm = resultState.claimForm;
 
   if (config.autoClaimExpeditions && claimForm) {
     setExpeditionPhase('claiming', {
@@ -727,6 +709,8 @@ async function backgroundHandleExpeditionResult(active) {
 
     const verified = await verifyBackgroundExpeditionClaim(active.resultUrl);
     if (verified) {
+      resetCaptureDecision('claim_verified:background');
+      clearExpeditionSelection('claim_verified:background');
       setExpeditionPhase('ready_to_start', {
         title: null,
         resultUrl: null,
