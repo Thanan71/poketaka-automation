@@ -945,15 +945,21 @@
 
     let selected = ranking[0];
 
-    // En mode progression, une nouvelle zone viable est toujours préférée
-    // à du farming si elle reste dans une plage de risque raisonnable.
+    // En mode progression, privilégie la destination la plus avancée
+    // parmi celles qui restent dans le seuil de réussite configuré.
     if (config.strategy === 'progression') {
-      const viableNewProgression = ranking.find(item =>
-        item.newProgression &&
-        (item.chance == null || item.chance >= config.minSuccessChance) &&
-        (item.requiredLevel == null || item.teamLevel == null || item.teamLevel >= item.requiredLevel)
-      );
-      if (viableNewProgression) selected = viableNewProgression;
+      const viableProgression = ranking
+        .filter(item =>
+          (item.chance == null || item.chance >= config.minSuccessChance) &&
+          (item.requiredLevel == null || item.teamLevel == null || item.teamLevel >= item.requiredLevel)
+        )
+        .sort((a, b) => {
+          if (a.index !== b.index) return b.index - a.index;
+          if (a.progressionRank !== b.progressionRank) return b.progressionRank - a.progressionRank;
+          return b.score - a.score;
+        });
+
+      if (viableProgression.length) selected = viableProgression[0];
     }
 
     state.selectedExpedition = selected.title;
