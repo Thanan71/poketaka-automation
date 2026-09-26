@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.8.6 - 2026-09-26
+
+- Extraction de toute la logique de capture dans `src/features/expeditions/capture.js`.
+- État de capture enrichi : espèce, statut Pokédex, rareté, IV, Ball, stock, chance et tentatives.
+- Nouvelle carte Capture dans le panel pendant une rencontre active.
+- La prochaine décision affiche directement Capturer / Ignorer / Manuel pour la rencontre courante.
+- Regroupement de tous les réglages de capture dans une seule section.
+- Réserve minimale de Balls ajustable depuis le panel.
+- Seuil IV minimum ajustable depuis le panel.
+- Les doublons non prioritaires sans bouton Fuir ne bloquent plus le cycle : ils sont ignorés proprement.
+- Les captures manuelles ne bloquent le bot que lorsque Capture auto est réellement désactivée.
+
+
 ## 0.8.5 - 2026-09-26
 
 - Le loader vérifie désormais `dist/version.json` à chaque chargement de PokéTaka.
