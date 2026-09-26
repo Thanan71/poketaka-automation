@@ -1230,7 +1230,7 @@ GM_addStyle(`
       'autoEvolvePokemon',
       'autoPlant',
     ];
-    const intelligenceKeys = ['smartTeam'];
+    const intelligenceKeys = ['smartTeam', 'directHttpActions'];
     const captureKeys = [
       'autoCapture',
       'smartCapture',
@@ -1265,6 +1265,17 @@ GM_addStyle(`
       .map(label => chipHtml(label))
       .join('');
 
+    const transport = httpTransportState();
+    const transportLabel = config.directHttpActions
+      ? transport.lastEndpoint
+        ? `HTTP · ${transport.lastStatus ?? '?'}`
+        : 'HTTP direct'
+      : 'Fallback DOM';
+    const transportTone = transport.lastError
+      ? 'danger'
+      : transport.lastEndpoint
+        ? 'ready'
+        : '';
     const captureView = liveCapturePanelState();
     const captureMeta = captureActionMeta(captureView.action);
     const captureLabel = captureView.species
@@ -1304,6 +1315,7 @@ GM_addStyle(`
           </div>
           <div class="pta-subtitle">
             ${escapeHtml(current?.label || 'Page PokéTaka')} · ${config.enabled ? 'Pilotage actif' : 'En pause'}
+            · ${config.directHttpActions ? 'HTTP direct' : 'DOM'}
             ${GM_info?.script?.version && GM_info.script.version !== VERSION
               ? ` · Loader ${escapeHtml(GM_info.script.version)}`
               : ''}
@@ -1564,6 +1576,22 @@ GM_addStyle(`
               </span>
             </div>
             <div class="pta-module">
+              <span class="pta-mini-dot ${transportTone}"></span>
+              <span class="pta-module-name">Transport</span>
+              <span
+                class="pta-module-status"
+                title="${escapeHtml(
+                  transport.lastError ||
+                  transport.lastEndpoint ||
+                  (config.directHttpActions
+                    ? 'POST same-origin depuis les formulaires observés'
+                    : 'Interactions DOM classiques')
+                )}"
+              >
+                ${escapeHtml(transportLabel)} · ${transport.requests || 0}
+              </span>
+            </div>
+            <div class="pta-module">
               <span class="pta-mini-dot current"></span>
               <span class="pta-module-name">Orchestrateur</span>
               <span class="pta-module-status" title="${escapeHtml(state.orchestrator?.lastReason || '')}">
@@ -1637,6 +1665,7 @@ GM_addStyle(`
           </summary>
           <div class="pta-settings">
             ${optionButton('smartTeam', 'Équipe intelligente')}
+            ${optionButton('directHttpActions', 'Requêtes HTTP directes')}
           </div>
         </details>
 
