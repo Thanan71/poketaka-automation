@@ -1148,6 +1148,25 @@ GM_addStyle(`
         return;
       }
 
+      if (action === 'view-dashboard') {
+        state.panelView = 'dashboard';
+        saveState(state);
+        updatePanel();
+        return;
+      }
+
+      if (action === 'view-logs') {
+        state.panelView = 'logs';
+        saveState(state);
+        updatePanel();
+        return;
+      }
+
+      if (action === 'clear-logs') {
+        clearActionLog();
+        return;
+      }
+
       if (action === 'capture-reserve-dec') {
         stepCaptureSetting('minBallReserve', -1, 0, 99);
         return;
@@ -1247,7 +1266,7 @@ GM_addStyle(`
 
     // updatePanel() reconstruit le contenu régulièrement. Sans conserver ces
     // valeurs, le navigateur remet le conteneur en haut à chaque rafraîchissement.
-    const previousBody = panel.querySelector('.pta-body');
+    const previousBody = panel.querySelector('.pta-body:not([hidden])');
     const previousScrollTop = previousBody?.scrollTop || 0;
     const hadRenderedBody = Boolean(previousBody);
 
@@ -1262,6 +1281,29 @@ GM_addStyle(`
 
     const current = moduleFromLocation();
     const next = nextDueModule();
+    const panelView = state.panelView === 'logs' ? 'logs' : 'dashboard';
+    const logEntries = actionLogEntries();
+    const logsHtml = logEntries.length
+      ? logEntries.map(entry => {
+          const time = new Date(entry.at || 0).toLocaleTimeString('fr-FR', {
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+          });
+          return `
+            <article class="pta-log-entry" data-level="${escapeHtml(entry.level || 'info')}">
+              <div class="pta-log-entry-head">
+                <span class="pta-log-category">${escapeHtml(entry.category || 'bot')}</span>
+                <span class="pta-log-time">${escapeHtml(time)}</span>
+              </div>
+              <div class="pta-log-message">${escapeHtml(entry.message || '')}</div>
+              ${entry.details ? `
+                <div class="pta-log-details">${escapeHtml(entry.details)}</div>
+              ` : ''}
+            </article>
+          `;
+        }).join('')
+      : '<div class="pta-log-empty">Aucune action enregistrée pour le moment.</div>';
     const cycleMeta = expeditionPhaseMeta(expeditionCycle().phase);
     const decision = panelNextDecision();
     const account = accountSnapshot();
@@ -1479,7 +1521,24 @@ GM_addStyle(`
         >${config.panelCollapsed ? '▣' : '—'}</button>
       </div>
 
-      <div class="pta-body">
+      <div class="pta-tabs" role="tablist" aria-label="Navigation du panel">
+        <button
+          class="pta-tab-btn"
+          data-action="view-dashboard"
+          data-active="${panelView === 'dashboard'}"
+          role="tab"
+          aria-selected="${panelView === 'dashboard'}"
+        >Pilotage</button>
+        <button
+          class="pta-tab-btn"
+          data-action="view-logs"
+          data-active="${panelView === 'logs'}"
+          role="tab"
+          aria-selected="${panelView === 'logs'}"
+        >Logs <span class="pta-tab-count">${logEntries.length}</span></button>
+      </div>
+
+      <div class="pta-body" data-panel-page="dashboard" ${panelView === 'logs' ? 'hidden' : ''}>
         <section class="pta-status-hero" aria-label="État de l’automatisation">
           <div class="pta-status-top">
             <div>
@@ -1934,12 +1993,25 @@ GM_addStyle(`
           Goal Planner v0.9 · GitHub Raw · actions destructrices bloquées
         </div>
       </div>
+
+      <div class="pta-body pta-log-page" data-panel-page="logs" ${panelView === 'dashboard' ? 'hidden' : ''}>
+        <div class="pta-log-toolbar">
+          <div class="pta-log-toolbar-copy">
+            <strong>Journal d’actions</strong>
+            <small>${logEntries.length} entrée${logEntries.length > 1 ? 's' : ''} · 120 maximum</small>
+          </div>
+          <button class="pta-log-clear" data-action="clear-logs">Vider</button>
+        </div>
+        <div class="pta-log-list">
+          ${logsHtml}
+        </div>
+      </div>
     `;
 
     // Restaurer immédiatement la position de lecture après le remplacement du
     // DOM. Le premier rendu reste naturellement positionné en haut.
     if (hadRenderedBody) {
-      const nextBody = panel.querySelector('.pta-body');
+      const nextBody = panel.querySelector('.pta-body:not([hidden])');
       if (nextBody) {
         nextBody.scrollTop = Math.min(
           previousScrollTop,
