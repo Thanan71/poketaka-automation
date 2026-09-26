@@ -123,3 +123,20 @@ L'automatisation peut être contraire aux règles d'un service même lorsque le 
 Dans Tampermonkey, utilise la commande **Afficher le classement des expéditions** lorsque tu es sur la page correspondante.
 
 La console affiche pour chaque choix détecté : score, zone, chance, niveau requis, niveau d'équipe, durée, récompenses et statut de progression. Le détail des bonus/pénalités est également journalisé lorsque le mode debug est actif.
+
+
+## Cycle autonome des expéditions
+
+À partir de la v0.4.0, le script maintient un état persistant pour les expéditions :
+
+1. détecte un emplacement d'expédition occupé ;
+2. mémorise l'heure de fin et l'URL de suivi ;
+3. attend sans naviguer inutilement ;
+4. ouvre automatiquement le résultat quand l'échéance est atteinte ;
+5. récupère les récompenses via les contrôles visibles ;
+6. s'arrête si une décision de capture est requise et que l'autocapture est désactivée ;
+7. retourne aux expéditions ;
+8. classe les destinations disponibles ;
+9. prépare puis lance la meilleure destination détectée.
+
+Le moteur n'appelle toujours aucune API privée et ne contourne aucun timer serveur.
