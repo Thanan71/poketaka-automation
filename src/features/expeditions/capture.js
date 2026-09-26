@@ -150,6 +150,40 @@ function parseCaptureAttempts(root) {
   return match ? Number(match[1]) : null;
 }
 
+function encounterOwnershipState(root, text = '') {
+  if (!root) return null;
+
+  const normalized = normalizeText(
+    text || root.innerText || root.textContent || ''
+  );
+
+  let isNew =
+    parseOptionalBoolean(root.getAttribute('data-new-species')) ??
+    parseOptionalBoolean(root.getAttribute('data-new'));
+
+  const owned =
+    parseOptionalBoolean(root.getAttribute('data-owned')) ??
+    parseOptionalBoolean(root.getAttribute('data-captured'));
+
+  if (isNew == null && owned != null) isNew = !owned;
+
+  if (
+    isNew == null &&
+    /absente? (?:du|au) pokedex|absent from pokedex|pas dans le pokedex|nouvelle espece|premiere capture|jamais capture|non capture|new species|first capture/.test(normalized)
+  ) {
+    isNew = true;
+  }
+
+  if (
+    isNew == null &&
+    /presente? (?:dans|au) (?:le )?pokedex|deja (?:dans|au) (?:le )?pokedex|deja capturee?|deja possedee?|already caught|already owned|already in (?:the )?pokedex/.test(normalized)
+  ) {
+    isNew = false;
+  }
+
+  return isNew;
+}
+
 function captureContext() {
   const root = resultEncounterRoot();
   if (!root) return null;
@@ -183,29 +217,7 @@ function captureContext() {
     root.querySelector('h3')?.textContent?.trim() ||
     'Pokémon rencontré';
 
-  let isNew =
-    parseOptionalBoolean(root.getAttribute('data-new-species')) ??
-    parseOptionalBoolean(root.getAttribute('data-new'));
-
-  const owned =
-    parseOptionalBoolean(root.getAttribute('data-owned')) ??
-    parseOptionalBoolean(root.getAttribute('data-captured'));
-
-  if (isNew == null && owned != null) isNew = !owned;
-
-  if (
-    isNew == null &&
-    /absente? du pokedex|absent from pokedex|nouvelle espece|premiere capture|jamais capture|non capture|new species|first capture/.test(text)
-  ) {
-    isNew = true;
-  }
-
-  if (
-    isNew == null &&
-    /presente? dans le pokedex|deja capture|deja possede|already caught|already owned/.test(text)
-  ) {
-    isNew = false;
-  }
+  const isNew = encounterOwnershipState(root, text);
 
   const rarity =
     normalizeText(root.getAttribute('data-rarity') || '') ||
@@ -236,7 +248,7 @@ function captureContext() {
 }
 
 function decideCapture(context) {
-  if (!context?.captureButton) {
+  if (!context?.captureButton && !context?.form) {
     return { action: 'none', reason: 'Aucune capture disponible' };
   }
 
@@ -264,6 +276,16 @@ function decideCapture(context) {
       reason: context.captureChance != null
         ? `Capture auto simple · ${context.captureChance}%`
         : 'Capture auto simple',
+    };
+  }
+
+  if (
+    context.isNew === false &&
+    !config.captureOwnedDuplicates
+  ) {
+    return {
+      action: context.skipButton ? 'skip' : 'ignore',
+      reason: 'Déjà possédé · doublons bloqués',
     };
   }
 
@@ -311,7 +333,7 @@ function decideCapture(context) {
   return {
     action: context.skipButton ? 'skip' : 'ignore',
     reason: context.isNew === false
-      ? 'Doublon non prioritaire'
+      ? 'Déjà possédé · aucun critère doublon autorisé'
       : 'Aucun critère intelligent validé',
   };
 }
