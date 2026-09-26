@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.9.2 - 2026-09-26
+
+- Ajout d'un transport HTTP same-origin dédié aux actions PokéTaka observées dans le DOM.
+- Les POST directs réutilisent uniquement les formulaires réellement rendus par PokéTaka, leurs tokens CSRF et leurs clés d'idempotence.
+- Whitelist stricte des routes automatisables ; les routes destructrices/économiques restent bloquées.
+- Capture automatique migrée de clic DOM vers POST direct.
+- Lancement d'expédition migré vers POST direct avec injection de l'équipe calculée via `pokemon_public_ids[]`.
+- Défi d'Arène migré vers POST direct avec injection de l'équipe calculée via `pokemon_public_ids[]`.
+- Renforcement Pokémon migré vers POST direct `/level-up`.
+- Évolution Pokémon migrée vers POST direct `/evolve`.
+- Les navigations simples vers les profils Pokémon et la préparation d'Arène utilisent désormais une navigation directe plutôt qu'un clic simulé.
+- Fallback DOM conservé et désactivable via le réglage "Requêtes HTTP directes".
+- Le panel affiche le mode de transport, le dernier statut HTTP, le dernier endpoint et le nombre de requêtes.
+- Les erreurs de validation serveur sont détectées sans relancer automatiquement une action critique.
+- Ajout de tests CI pour la whitelist, le same-origin, CSRF/idempotency, les endpoints sensibles bloqués et le câblage direct des actions.
+
+
 ## 0.9.1 - 2026-09-26
 
 - Automatisation intelligente du renforcement des Pokémon.
