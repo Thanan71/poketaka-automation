@@ -23,23 +23,31 @@ La logique métier ne doit plus y être ajoutée.
 - `dist/runtime.js`
 - `dist/poketaka.user.js`
 - `dist/version.json`
-- `dist/index.html`
 
 Le runtime est autonome une fois construit. Les modules peuvent donc partager les fonctions existantes sans dépendance externe.
 
+## Distribution GitHub Raw
+
+Le repository est public. La distribution ne dépend donc plus de GitHub Pages.
+
+Tampermonkey utilise directement :
+
+- loader : `https://raw.githubusercontent.com/Thanan71/poketaka-automation/main/poketaka.user.js`
+- runtime : `https://raw.githubusercontent.com/Thanan71/poketaka-automation/main/dist/runtime.js`
+
+Le loader conserve une copie locale du dernier runtime récupéré avec succès afin de pouvoir continuer à fonctionner si GitHub Raw est temporairement indisponible.
+
 ## Version Tampermonkey
 
-Sur chaque push vers `main`, le workflow GitHub Pages calcule une version de la forme :
+Toutes les versions utilisent strictement le format `X.X.X`.
 
-`YYYY.M.D.<github.run_number>`
+À chaque push humain sur `main`, le workflow de publication :
 
-Cette version est injectée dans le loader **et** dans le runtime publiés. Ainsi, modifier n'importe quel fichier du repo déclenche une nouvelle version Tampermonkey sans modification manuelle de `poketaka.user.js`.
+1. lit la version actuelle de `package.json` ;
+2. conserve une version explicitement modifiée par le développeur, par exemple `0.8.0` ;
+3. sinon incrémente uniquement le patch, par exemple `0.7.2 → 0.7.3` ;
+4. reconstruit le runtime ;
+5. remplace uniquement la version et les métadonnées générées du loader racine ;
+6. commit les artefacts générés avec `[skip ci]` pour éviter une boucle.
 
-## Distribution
-
-La distribution est publiée uniquement via GitHub Pages :
-
-- loader : `https://thanan71.github.io/poketaka-automation/poketaka.user.js`
-- runtime : `https://thanan71.github.io/poketaka-automation/runtime.js`
-
-Le repository peut rester privé si le compte GitHub autorise Pages pour les repositories privés.
+Ainsi, les changements fonctionnels se font dans `src/`, tandis que `poketaka.user.js` reste presque immuable.
