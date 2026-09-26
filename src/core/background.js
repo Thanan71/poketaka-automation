@@ -427,6 +427,15 @@ async function backgroundHandleExpeditionResult(active) {
     saveState(state);
     updatePanel();
 
+    if (capture.action === 'manual') {
+      setExpeditionPhase('due', {
+        title: active.title,
+        resultUrl: active.resultUrl,
+        dueAt: active.dueAt,
+      });
+      return false;
+    }
+
     if (capture.action === 'capture') {
       const submitted = await submitObservedForm(
         capture.form,
@@ -437,7 +446,15 @@ async function backgroundHandleExpeditionResult(active) {
           moduleId: 'expeditions',
         }
       );
+
       if (submitted) return true;
+
+      setExpeditionPhase('due', {
+        title: active.title,
+        resultUrl: active.resultUrl,
+        dueAt: active.dueAt,
+      });
+      return false;
     }
   }
 
