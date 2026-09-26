@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PokéTaka Automation
 // @namespace    https://github.com/Thanan71/poketaka-automation
-// @version      0.3.2
+// @version      0.3.3
 // @description  Assistant d'automatisation DOM pour PokéTaka : expéditions, récompenses, soins, serre et progression.
 // @author       Thanan71
 // @match        https://poketaka.fr/*
@@ -16,7 +16,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.3.2';
+  const VERSION = '0.3.3';
   const STORAGE_KEY = 'poketaka-automation:config';
   const STATE_KEY = 'poketaka-automation:state';
 
@@ -792,8 +792,72 @@
     const root = document.querySelector('main, [role="main"], #content, .content') || document.body;
     if (!root) return null;
 
-    // 1) Sources structurées : préférables au texte car elles représentent souvent
-    // directement l'heure de fin calculée par le front.
+    // 1) Timers spécifiques au module. PokéTaka expose par exemple les expéditions
+    // avec <time data-countdown data-countdown-format="expedition" datetime="...">.
+    // On les traite avant tout timer générique pour ne jamais confondre avec
+    // l'horloge "Heure en jeu".
+    const prioritySelectors = {
+      expeditions: [
+        'time[data-countdown][data-countdown-format="expedition"]',
+        '.mission-slot-card--occupied time[data-countdown]',
+        '.mission-slot-card__progress time[data-countdown]',
+        'progress[data-mission-progress][data-progress-end]',
+      ],
+      greenhouse: [
+        'time[data-countdown][data-countdown-format*="greenhouse"]',
+        '[data-greenhouse] time[data-countdown]',
+        '[class*="greenhouse"] time[data-countdown]',
+      ],
+      incubator: [
+        'time[data-countdown][data-countdown-format*="egg"]',
+        'time[data-countdown][data-countdown-format*="incubat"]',
+        '[class*="incubat"] time[data-countdown]',
+      ],
+      breeding: [
+        'time[data-countdown][data-countdown-format*="breed"]',
+        '[class*="breeding"] time[data-countdown]',
+        '[class*="daycare"] time[data-countdown]',
+      ],
+    };
+
+    const priority = [...root.querySelectorAll((prioritySelectors[module.id] || []).join(','))]
+      .filter(isVisible)
+      .filter(el => !el.closest('#pta-panel'));
+
+    for (const element of priority) {
+      // Pour la barre de progression d'expédition, la fin est exposée directement.
+      const progressEnd = element.getAttribute?.('data-progress-end');
+      const progressDelta = parseTimestampValue(progressEnd);
+      if (progressDelta) {
+        return {
+          ms: progressDelta,
+          source: 'data-progress-end',
+          text: progressEnd,
+        };
+      }
+
+      const fromAttribute = timerDataAttributeMs(element);
+      if (fromAttribute) {
+        return {
+          ms: fromAttribute.ms,
+          source: `timer ${module.id} structuré`,
+          text: fromAttribute.source,
+        };
+      }
+
+      const text = normalizeText(element.textContent || element.getAttribute('aria-label') || '');
+      const countdown = parseCountdownMs(text);
+      if (countdown) {
+        return {
+          ms: countdown,
+          source: `timer ${module.id} visible`,
+          text,
+        };
+      }
+    }
+
+    // 2) Sources structurées génériques, en excluant explicitement les horloges
+    // décoratives / heure en jeu.
     const structured = [...root.querySelectorAll([
       'time[datetime]',
       '[data-countdown]',
@@ -813,14 +877,16 @@
       '[id*="timer"]',
     ].join(','))]
       .filter(isVisible)
-      .filter(el => !el.closest('#pta-panel'));
+      .filter(el => !el.closest('#pta-panel'))
+      .filter(el => !el.matches('[data-day-night-time], [data-day-night-clock], .day-night-clock, .day-night-clock *'))
+      .filter(el => !el.closest('[data-day-night-clock], .day-night-clock'));
 
     for (const element of structured) {
       const fromAttribute = timerDataAttributeMs(element);
       if (fromAttribute) {
         return {
           ms: fromAttribute.ms,
-          source: 'attribut structuré',
+          source: 'attribut structuré générique',
           text: fromAttribute.source,
         };
       }
@@ -831,8 +897,10 @@
       const absolute = parseAbsoluteEndClockMs(text);
       if (absolute) return { ms: absolute, source: 'timer structuré (heure de fin)', text };
 
+      // Un simple HH:MM n'est accepté ici que dans un contexte de compte à rebours.
+      if (!activeTimerContext(text, module.id)) continue;
       const countdown = parseCountdownMs(text);
-      if (countdown) return { ms: countdown, source: 'timer structuré', text };
+      if (countdown) return { ms: countdown, source: 'timer structuré contextuel', text };
     }
 
     // 2) Texte contextuel : on ne considère un nombre comme timer que s'il est
@@ -1381,6 +1449,7 @@
 
   function nextDueModule() {
     return MODULES
+      .filter(module => moduleEnabled(module.id))
       .map(module => ({
         module,
         dueAt: state.moduleStatus?.[module.id]?.nextDueAt || null,
@@ -1391,11 +1460,17 @@
 
   function moduleDisplayStatus(module) {
     const current = moduleFromLocation();
+    const status = state.moduleStatus?.[module.id] || {};
+
     if (current?.id === module.id) {
+      if (status.nextDueAt) {
+        const remaining = formatRemaining(status.nextDueAt);
+        if (remaining === 'Prêt') return { className: 'ready', label: 'Ici · Prêt' };
+        return { className: 'current', label: `Ici · ${remaining}` };
+      }
       return { className: 'current', label: 'Ici' };
     }
 
-    const status = state.moduleStatus?.[module.id] || {};
     if (status.nextDueAt) {
       const remaining = formatRemaining(status.nextDueAt);
       if (remaining === 'Prêt') return { className: 'ready', label: 'Prêt' };
