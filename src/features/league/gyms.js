@@ -309,7 +309,9 @@ async function handleLeagueAutomation() {
       return false;
     }
 
-    return clickElement(returnLink, 'Arène: retour au Circuit');
+    return config.directHttpActions
+      ? navigateDirectly(returnLink.href, 'Arène: retour au Circuit')
+      : clickElement(returnLink, 'Arène: retour au Circuit');
   }
 
   if (isLeagueIndexPage()) {
@@ -394,6 +396,14 @@ async function handleLeagueAutomation() {
       champion: gym.champion,
       badge: gym.badge,
     });
+
+    if (config.directHttpActions) {
+      return navigateDirectly(
+        gym.prepare.href,
+        `Arène: ouvrir ${gym.arena}`
+      );
+    }
+
     return clickElement(
       gym.prepare,
       `Arène: préparer ${gym.arena}`
@@ -414,6 +424,37 @@ async function handleLeagueAutomation() {
       saveState(state);
       updatePanel();
       return false;
+    }
+
+    if (config.directHttpActions && assessment.plan.viable) {
+      if (recentDirectRequest(1800) || recentBotAction(1800)) return false;
+
+      const plannedIds = assessment.plan.team.map(pokemon => pokemon.id);
+      if (plannedIds.length >= requirement.min) {
+        state.gymCycle = {
+          ...gymCycle(),
+          phase: 'challenging',
+          selectedTeam: assessment.plan.team.map(pokemon => pokemon.name),
+          teamScore: assessment.plan.teamScore,
+          reason: `Défi HTTP lancé avec ${assessment.plan.team.map(pokemon => pokemon.name).join(', ')}`,
+          lastChallengeAt: now(),
+          challengeSubmittedDay: localDayKey(),
+        };
+        saveState(state);
+        updatePanel();
+
+        return submitObservedForm(
+          form,
+          `Arène HTTP: défier ${assessment.context?.champion || assessment.context?.title || 'le Champion'}`,
+          {
+            expectedKind: 'gym_challenge',
+            overrides: {
+              selection_source: 'custom',
+              'pokemon_public_ids[]': plannedIds,
+            },
+          }
+        );
+      }
     }
 
     if (requirement.selected < requirement.min) {
@@ -456,6 +497,14 @@ async function handleLeagueAutomation() {
     };
     saveState(state);
     updatePanel();
+
+    if (config.directHttpActions) {
+      return submitObservedForm(
+        form,
+        `Arène HTTP: défier ${assessment.context?.champion || assessment.context?.title || 'le Champion'}`,
+        { expectedKind: 'gym_challenge' }
+      );
+    }
 
     return clickElement(
       challenge,
