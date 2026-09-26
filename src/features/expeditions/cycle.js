@@ -12,7 +12,7 @@ async function claimExpedition() {
         'Récupération HTTP des récompenses',
         {
           expectedKind: 'expedition_claim',
-          navigate: false,
+          navigate: true,
           moduleId: 'expeditions',
         }
       );
@@ -151,9 +151,28 @@ async function claimExpedition() {
   }
 
   async function returnToExpeditions() {
+    const resultState = expeditionResultState(document);
+    if (resultState.hasClaim) {
+      appendActionLog(
+        'warning',
+        'state',
+        'Retour expéditions refusé: récompenses encore à récupérer',
+        { pathname: location.pathname }
+      );
+      setExpeditionPhase('due');
+      return false;
+    }
+
     const link = expeditionIndexLink();
     if (!link) return false;
-    setExpeditionPhase('ready_to_start', { resultUrl: null, dueAt: null });
+
+    resetCaptureDecision('leaving_resolved_result');
+    clearExpeditionSelection('leaving_resolved_result');
+    setExpeditionPhase('ready_to_start', {
+      title: null,
+      resultUrl: null,
+      dueAt: null,
+    });
     return clickElement(link, 'Retour aux expéditions');
   }
 
@@ -205,8 +224,8 @@ async function claimExpedition() {
         return false;
       }
 
-      state.selectedExpedition = null;
-      state.selectedExpeditionScore = null;
+      resetCaptureDecision('visible_expedition_index_without_active');
+      clearExpeditionSelection('visible_expedition_index_without_active');
       setExpeditionPhase('ready_to_start', {
         title: null,
         resultUrl: null,
@@ -218,12 +237,13 @@ async function claimExpedition() {
 
     if (isExpeditionResultPage()) {
       recordExpeditionOutcome();
+      const resultState = reconcileExpeditionResultState(document, 'visible_result');
 
       if (!['claiming', 'awaiting_capture'].includes(cycleState.phase)) {
         setExpeditionPhase('result');
       }
 
-      if (resultPageHasPendingCapture()) {
+      if (resultState.hasCapture && resultPageHasPendingCapture()) {
         const handledCapture = await captureEncounter();
         if (handledCapture) return true;
 
@@ -232,14 +252,25 @@ async function claimExpedition() {
         }
       }
 
-      const claimed = await claimExpedition();
-      if (claimed) return true;
+      if (resultState.hasClaim) {
+        const claimed = await claimExpedition();
+        if (claimed) return true;
+
+        // Invariant: a visible /claim form always wins over any stale local
+        // phase such as ready_to_start or claiming.
+        setExpeditionPhase('due');
+        return false;
+      }
 
       const currentCycle = expeditionCycle();
       const claimGracePassed = now() - (currentCycle.lastTransitionAt || 0) > 2500;
       if (
         claimGracePassed &&
-        (currentCycle.phase === 'claiming' || resultPageLooksResolved())
+        (
+          resultState.rewardsRecovered ||
+          currentCycle.phase === 'claiming' ||
+          resultPageLooksResolved()
+        )
       ) {
         return returnToExpeditions();
       }
