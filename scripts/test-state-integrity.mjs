@@ -7,6 +7,7 @@ const httpSource = fs.readFileSync('src/core/http.js', 'utf8');
 const domSource = fs.readFileSync('src/core/dom.js', 'utf8');
 const cycleSource = fs.readFileSync('src/features/expeditions/cycle.js', 'utf8');
 const backgroundSource = fs.readFileSync('src/core/background.js', 'utf8');
+const panelSource = fs.readFileSync('src/ui/panel.js', 'utf8');
 
 function normalizeText(value = '') {
   return String(value)
@@ -139,8 +140,24 @@ assert(
   'background result flow must reconcile and clear stale state after verified claim'
 );
 
+assert(
+  backgroundSource.includes("resultAction &&") &&
+  backgroundSource.includes("expeditionCycle().phase !== 'ready_to_start'") &&
+  backgroundSource.includes("Slot libéré après résultat — recherche immédiate d’une nouvelle expédition") &&
+  backgroundSource.includes("backgroundObserveExpeditions({\n        force: true"),
+  'verified claims must keep the same background cycle alive and immediately re-observe /expeditions'
+);
+
+assert(
+  panelSource.includes('liveCapture.captureButton || liveCapture.form || liveCapture.skipButton') &&
+  panelSource.includes('context.captureButton || context.form || context.skipButton'),
+  'resolved encounters must not stay visible as actionable capture decisions'
+);
+
 console.log('Real expedition-result HTML fixtures: OK');
 console.log('Pending claim invariant: OK');
 console.log('Capture state cleanup wiring: OK');
 console.log('HTTP/DOM duplicate-action guards: OK');
 console.log('Visible/background result reconciliation: OK');
+console.log('Verified claim relaunch continuation: OK');
+console.log('Resolved capture panel cleanup: OK');
