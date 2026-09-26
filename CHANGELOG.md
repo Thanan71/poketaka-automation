@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.9.9 - 2026-09-26
+
+- Correction de la récupération automatique des récompenses d'expédition.
+- Ajout du endpoint direct `POST /expeditions/results/{id}/claim` à la whitelist HTTP.
+- Le formulaire de claim observé réutilise son token CSRF réel ; aucune clé d'idempotence n'est inventée lorsqu'elle n'est pas fournie par PokéTaka.
+- En mode GET silencieux, le bot traite désormais : capture éventuelle → récupération des récompenses → vérification serveur → relance.
+- Le bot ne passe plus à `ready_to_start` tant qu'un formulaire de récupération est encore présent ou qu'une récompense reste marquée "À récupérer".
+- Vérification forcée du bilan après le POST claim ; une redirection serveur vers `/expeditions` compte aussi comme confirmation.
+- Détection renforcée des bilans terminés qui disparaissent du slot actif : liens de résultat, badge d'expédition terminée et URL du bilan courant sont utilisés pour retrouver le résultat pending.
+- Si un résultat terminé est détecté sans URL exploitable, aucune nouvelle expédition n'est lancée afin de ne jamais sauter les récompenses.
+- La récupération visible depuis la page de bilan utilise également le POST direct quand il est disponible.
+- Journalisation de la tentative, du succès et des échecs de récupération dans l'onglet Logs.
+- Ajout de tests CI pour la whitelist du claim, le POST direct et la vérification arrière-plan.
+
+
 ## 0.9.8 - 2026-09-26
 
 - Correction de la capture intelligente qui pouvait encore capturer un Pokémon déjà possédé si celui-ci était rare ou dépassait le seuil d'IV.
