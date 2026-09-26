@@ -44,7 +44,7 @@ jobs:
           node --check dist/runtime.js
           node --check dist/poketaka.user.js
           grep -F "@version      ${{ steps.version.outputs.version }}" dist/poketaka.user.js
-          grep -F "const VERSION = '${{ steps.version.outputs.version }}'" dist/runtime.js
+          grep -F "const VERSION = \"${{ steps.version.outputs.version }}\"" dist/runtime.js
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
