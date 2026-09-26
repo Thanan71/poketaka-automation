@@ -12,6 +12,7 @@ const MODULES = [
   'src/features/league/gyms.js',
   'src/account/snapshot.js',
   'src/planner/goals.js',
+  'src/features/pokemon/progression.js',
   'src/features/expeditions/capture.js',
   'src/features/expeditions/cycle.js',
   'src/features/activities.js',
