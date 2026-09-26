@@ -536,7 +536,10 @@
       }
     }
 
-    if (cycleState.phase === 'preparing' || cycleState.phase === 'starting') {
+    if (isExpeditionPreparePage()) {
+      if (!['preparing', 'starting'].includes(cycleState.phase)) {
+        setExpeditionPhase('preparing');
+      }
       return handleExpeditionPreparation();
     }
 
