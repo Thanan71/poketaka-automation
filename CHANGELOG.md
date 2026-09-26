@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.3 - 2026-09-26
+
+- Adaptation du timer d'expédition au HTML réel de PokéTaka.
+- Priorité à `time[data-countdown][data-countdown-format="expedition"]` dans l'emplacement occupé.
+- Utilisation du `datetime` serveur comme heure de fin exacte.
+- Fallback sur `data-progress-end` de la barre de progression.
+- Exclusion explicite de l'horloge "Heure en jeu".
+- Le module Expéditions affiche désormais "Ici · <temps restant>".
+- La prochaine échéance ignore les modules désactivés.
+
+
 ## 0.3.2 - 2026-09-26
 
 - Correction de la détection des timers d'expédition.
