@@ -235,3 +235,36 @@ Comme un défi consomme l'unique combat d'arène du jour, le lancement est suspe
 - la sélection affichée ne correspond pas au plan calculé.
 
 Le seuil de PV est configurable depuis le panel et vaut 70 % par défaut.
+
+
+## Goal Planner v0.9
+
+La v0.9 ajoute une couche de stratégie globale au-dessus des automatismes existants.
+
+Le bot maintient maintenant un **snapshot du compte** à partir des informations réellement observées : niveau dresseur, espèces capturées, roster connu, badges, état quotidien des Arènes, expéditions terminées et destinations verrouillées.
+
+À chaque cycle, le planner produit :
+
+- un **objectif principal** ;
+- une **étape suivante** ;
+- les **blocages connus** ;
+- le module à privilégier ;
+- un niveau de confiance.
+
+Exemples de plans :
+
+`Débloquer Arène des Ramures → terminer Forêt Épines → niveau dresseur 3 requis → farmer les expéditions`
+
+`Obtenir Badge Aube → équipe trop blessée → Centre Pokémon → retour automatique à l'Arène`
+
+`Débloquer Mont Vertige → 6 espèces requises → privilégier les expéditions à forte chance de rencontre`
+
+Le Goal Planner influence ensuite les priorités de l'orchestrateur. Les urgences déjà sûres, comme un résultat d'expédition à récupérer, conservent leur priorité, mais le bot évite désormais de naviguer ou farmer sans rapport avec son objectif principal.
+
+### État du compte
+
+Les données absentes ne sont jamais inventées. Le snapshot conserve `null` lorsqu'une information n'a pas encore été observée. Le bot peut donc afficher une confiance faible ou moyenne jusqu'à ce qu'il visite une page fournissant les informations nécessaires.
+
+### Arènes quotidiennes
+
+La v0.9 renforce aussi la protection du combat quotidien : dès qu'un défi a été soumis, aucune deuxième tentative automatique n'est autorisée le même jour. Une page de résultat confirme définitivement le combat comme consommé jusqu'au lendemain.
