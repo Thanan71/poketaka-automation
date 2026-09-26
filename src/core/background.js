@@ -237,6 +237,21 @@ async function backgroundObserveExpeditions() {
       dueAt,
     });
 
+    if (
+      normalizeText(state.expeditionPlan?.title || '') !==
+      normalizeText(active.title || '')
+    ) {
+      state.expeditionPlan = {
+        title: active.title,
+        team: [],
+        teamIds: [],
+        teamScore: null,
+        viability: 'active',
+        reason: 'Expédition active observée en arrière-plan',
+        updatedAt: now(),
+      };
+    }
+
     state.accountSnapshot = {
       ...accountSnapshot(),
       expeditions: {
@@ -512,6 +527,21 @@ async function backgroundStartExpedition(expeditionPage) {
   });
 
   const assessment = preparationTeamPlan(requirement);
+
+  state.expeditionPlan = {
+    title: selected.title,
+    team: assessment.plan.team.map(pokemon => pokemon.name),
+    teamIds: assessment.plan.team.map(pokemon => pokemon.id),
+    teamScore: assessment.plan.teamScore,
+    viability: assessment.plan.known
+      ? (assessment.plan.viable ? 'viable' : 'blocked')
+      : 'unknown',
+    reason: assessment.plan.reason,
+    updatedAt: now(),
+  };
+  saveState(state);
+  updatePanel();
+
   if (!assessment.plan.viable) {
     blockMissionTemporarily(selected.title, assessment.plan.reason);
     state.lastAction = `Mission écartée en arrière-plan: ${selected.title} — ${assessment.plan.reason}`;
