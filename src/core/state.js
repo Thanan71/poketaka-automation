@@ -259,17 +259,27 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
         ? previous.lastTransitionAt
         : now(),
     };
+    const changed =
+      previous.phase !== state.expeditionCycle.phase ||
+      previous.title !== state.expeditionCycle.title ||
+      previous.resultUrl !== state.expeditionCycle.resultUrl ||
+      previous.dueAt !== state.expeditionCycle.dueAt;
+
     saveState(state);
     updatePanel();
-    appendActionLog(
-      'info',
-      'expedition',
-      `Cycle expédition → ${phase}`,
-      {
-        title: state.expeditionCycle.title,
-        dueAt: state.expeditionCycle.dueAt,
-      }
-    );
+
+    if (changed) {
+      appendActionLog(
+        'info',
+        'expedition',
+        `Cycle expédition → ${phase}`,
+        {
+          title: state.expeditionCycle.title,
+          dueAt: state.expeditionCycle.dueAt,
+        }
+      );
+    }
+
     log('Cycle expédition:', state.expeditionCycle);
   }
 
