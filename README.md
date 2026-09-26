@@ -327,3 +327,33 @@ Le panel affiche séparément :
 Si un GET échoue ou si le HTML ne contient pas assez d'informations, le bot ne devine rien : le fallback DOM/navigation redevient disponible automatiquement.
 
 Les résultats d'expédition peuvent aussi être lus hors écran. Une capture automatique peut donc être effectuée sans ouvrir visuellement le bilan, tandis qu'une capture manuelle force encore le fallback visible.
+
+
+## Journal d'actions
+
+Le panel possède maintenant deux vues :
+
+- **Pilotage** : état du bot, objectif global, mission, modules et réglages ;
+- **Logs** : historique des actions réellement exécutées.
+
+Le journal conserve jusqu'à 120 entrées et affiche notamment :
+
+- les tentatives de lancement d'expédition ;
+- les POST HTTP directs et leur statut ;
+- les confirmations de lancement après relecture de `/expeditions` ;
+- les erreurs GET/POST ;
+- les navigations ou clics DOM utilisés en fallback ;
+- les transitions importantes du cycle d'expédition ;
+- les décisions exécutées par l'orchestrateur.
+
+Le bouton **Vider** efface le journal.
+
+### Lancement silencieux d'expédition
+
+Quand **GET silencieux** et **POST HTTP directs** sont actifs, le bot ne doit plus ouvrir visuellement la page Expéditions pour relancer une mission.
+
+Le flux est :
+
+`GET /expeditions → GET /prepare → calcul équipe → POST /launch → GET /expeditions de vérification`
+
+Si le premier POST ne crée pas d'expédition vérifiable, le bot recharge une fois le formulaire de préparation et effectue une seule deuxième tentative avec les nouveaux tokens serveur. Le fallback visible reste réservé aux situations réellement non automatisables, comme certaines décisions manuelles.
