@@ -36,12 +36,12 @@ function pokemonNumber(value) {
 }
 
 function isCollectionIndexPage() {
-  return /^/collection/?$/.test(location.pathname);
+  return /^\/collection\/?$/.test(location.pathname);
 }
 
 function isPokemonProfilePage() {
   return Boolean(
-    /^/collection/[^/]+/?$/.test(location.pathname) &&
+    /^\/collection\/[^/]+\/?$/.test(location.pathname) &&
     document.querySelector('#pokemon-profile-section')
   );
 }
@@ -326,7 +326,7 @@ function collectionReturnLink() {
     .find(anchor => {
       try {
         const url = new URL(anchor.href, location.href);
-        return url.origin === location.origin && /^/collection/?$/.test(url.pathname);
+        return url.origin === location.origin && /^\/collection\/?$/.test(url.pathname);
       } catch {
         return false;
       }
