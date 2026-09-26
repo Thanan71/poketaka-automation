@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.7.0 - 2026-09-26
+
+- Ajout d'un orchestrateur global qui priorise les actions utiles à chaque cycle.
+- Le cycle manuel fonctionne même lorsque l'automatisation globale est en pause.
+- Ajout d'une sélection intelligente de l'équipe d'expédition.
+- Le choix d'équipe tient compte du niveau, des PV, des types, du niveau conseillé, des favoris et de l'objet tenu.
+- Le formulaire d'expédition est rempli directement avant le lancement.
+- La chance affichée sur une mission est traitée comme chance de rencontre et non comme chance de réussite.
+- Ajout d'une mémoire des succès, échecs et séries d'échecs par expédition.
+- Les missions ayant plusieurs échecs consécutifs sont fortement pénalisées pour favoriser une difficulté inférieure.
+- Ajout d'une logique de capture intelligente : nouvelle espèce, rareté, IV et réserve minimale de Balls.
+- Ajout d'un mode prudent : les rencontres inconnues ne consomment pas de Ball par défaut.
+- Le dashboard expose la dernière décision de l'orchestrateur, l'équipe choisie et la dernière décision de capture.
+- Ajout de réglages pour équipe intelligente et captures intelligentes.
+
+
 ## 0.4.2 - 2026-09-26
 
 - Correction du lancement d'expédition : le bot compose désormais l'équipe avant de soumettre le formulaire.
