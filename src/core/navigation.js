@@ -561,13 +561,25 @@ function moduleEnabled(moduleId) {
       });
     }
 
+    const pokemonFallbackNeeded =
+      state.expeditionPlan?.viability === 'blocked';
+
     if (
       (config.autoLevelPokemon || config.autoEvolvePokemon) &&
       (isCollectionIndexPage() || isPokemonProfilePage()) &&
       (
-        pokemonProgressionScanDue() ||
-        ['scanning', 'opening_profile', 'level_ready', 'evolution_ready', 'scanned', 'blocked', 'manual'].includes(
-          pokemonProgressionState().phase
+        !expeditionHasPriorityOverPokemonProgression() ||
+        pokemonFallbackNeeded
+      ) &&
+      (
+        pokemonProgressionScanDue({
+          allowExpeditionFallback: pokemonFallbackNeeded,
+        }) ||
+        (
+          pokemonFallbackNeeded &&
+          ['scanning', 'opening_profile', 'level_ready', 'evolution_ready', 'scanned', 'blocked', 'manual'].includes(
+            pokemonProgressionState().phase
+          )
         )
       )
     ) {
@@ -575,7 +587,9 @@ function moduleEnabled(moduleId) {
         name: 'pokemon-progression',
         priority: 6750,
         reason: pokemonProgressionState().reason || 'progression Pokémon intelligente',
-        run: handlePokemonProgression,
+        run: () => handlePokemonProgression({
+          allowExpeditionFallback: pokemonFallbackNeeded,
+        }),
       });
     }
 
