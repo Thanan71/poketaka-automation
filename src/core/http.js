@@ -13,9 +13,15 @@ function backgroundHttpState() {
       lastStatus: null,
       lastError: null,
       lastSweepAt: 0,
+      observedPaths: {},
     };
   }
   return state.backgroundHttp;
+}
+
+function backgroundRouteFresh(pathname, maxAgeMs = 90000) {
+  const observedAt = Number(backgroundHttpState().observedPaths?.[pathname] || 0);
+  return observedAt > 0 && now() - observedAt <= maxAgeMs;
 }
 
 function backgroundPageKind(urlLike) {
@@ -155,6 +161,10 @@ async function fetchObservedPage(
       lastUrl: finalUrl.pathname,
       lastStatus: response.status,
       lastError: null,
+      observedPaths: {
+        ...(backgroundHttpState().observedPaths || {}),
+        [finalUrl.pathname]: now(),
+      },
     });
 
     return result;
