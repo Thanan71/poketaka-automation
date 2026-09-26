@@ -305,3 +305,25 @@ Pour les équipes, le bot envoie directement les IDs de l'équipe calculée via 
 Le mode est activé par défaut avec **Requêtes HTTP directes** dans le panel. S'il est désactivé, le bot revient au comportement DOM historique.
 
 Le transport ne cherche pas d'API cachée et n'invente pas de routes : seules les routes observées dans les formulaires PokéTaka et explicitement autorisées sont utilisables.
+
+
+## Mode GET silencieux
+
+PokéTaka Automation peut maintenant collecter les informations nécessaires sans te faire naviguer de page en page.
+
+Exemple :
+
+`GET /expeditions → choix de mission → GET /prepare → calcul équipe → POST /launch`
+
+La même logique s'applique à la Ligue et à la progression Pokémon.
+
+Le mode lit les pages avec la session actuelle du navigateur, parse leur HTML hors écran, puis n'effectue un POST que lorsqu'un formulaire serveur observé est suffisamment explicite.
+
+Le panel affiche séparément :
+
+- **Observation** : GET silencieux et dernière route lue ;
+- **Transport** : POST directs et dernier endpoint exécuté.
+
+Si un GET échoue ou si le HTML ne contient pas assez d'informations, le bot ne devine rien : le fallback DOM/navigation redevient disponible automatiquement.
+
+Les résultats d'expédition peuvent aussi être lus hors écran. Une capture automatique peut donc être effectuée sans ouvrir visuellement le bilan, tandis qu'une capture manuelle force encore le fallback visible.
