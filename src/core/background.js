@@ -402,6 +402,57 @@ function recordDetachedExpeditionOutcome(root, pathname) {
   saveState(state);
 }
 
+function expeditionRewardClaimForm(root) {
+  return root.querySelector(
+    'form[method="POST"][action*="/expeditions/results/"][action$="/claim"]'
+  );
+}
+
+function expeditionRewardsRecovered(root) {
+  const claimForm = expeditionRewardClaimForm(root);
+  if (claimForm) return false;
+
+  const metas = [...root.querySelectorAll('.mission-rewards .mission-reward__meta')]
+    .map(node => normalizeText(node.textContent || ''))
+    .filter(Boolean);
+
+  if (!metas.length) {
+    return Boolean(root.querySelector('.result-claimed'));
+  }
+
+  return metas.every(meta =>
+    !/a recuperer|to claim|claimable|pending/.test(meta)
+  );
+}
+
+async function verifyBackgroundExpeditionClaim(resultUrl) {
+  const page = await fetchObservedPage(resultUrl, {
+    cacheMs: 0,
+    force: true,
+  });
+  if (!page) return false;
+
+  const recovered = expeditionRewardsRecovered(page.doc);
+
+  if (recovered) {
+    appendActionLog(
+      'success',
+      'expedition',
+      'Récompenses d’expédition confirmées',
+      { resultUrl: page.pathname }
+    );
+    return true;
+  }
+
+  appendActionLog(
+    'warning',
+    'expedition',
+    'Récompenses toujours en attente après le POST',
+    { resultUrl: page.pathname }
+  );
+  return false;
+}
+
 async function backgroundHandleExpeditionResult(active) {
   if (!active?.resultUrl) return false;
 
@@ -478,22 +529,77 @@ async function backgroundHandleExpeditionResult(active) {
     }
   }
 
-  const text = normalizeText(page.doc.body?.textContent || '');
-  const rewardsRecovered =
-    Boolean(page.doc.querySelector('.result-claimed')) ||
-    /recompenses recuperees|recompense recuperee|status badge success.*recuperee/.test(text);
-
-  if (rewardsRecovered) {
+  if (expeditionRewardsRecovered(page.doc)) {
     setExpeditionPhase('ready_to_start', {
       title: null,
       resultUrl: null,
       dueAt: null,
     });
+    appendActionLog(
+      'success',
+      'expedition',
+      `Résultat finalisé: ${active.title}`,
+      'Toutes les récompenses sont déjà récupérées'
+    );
     return false;
   }
 
-  // Contrat serveur inconnu : conserver le fallback visible pour ne pas
-  // inventer une action de récupération.
+  const claimForm = expeditionRewardClaimForm(page.doc);
+
+  if (config.autoClaimExpeditions && claimForm) {
+    setExpeditionPhase('claiming', {
+      title: active.title,
+      resultUrl: active.resultUrl,
+      dueAt: active.dueAt,
+    });
+
+    appendActionLog(
+      'info',
+      'expedition',
+      `Récupération des récompenses: ${active.title}`,
+      { endpoint: claimForm.getAttribute('action') || claimForm.action }
+    );
+
+    const claimed = await submitObservedForm(
+      claimForm,
+      `Récompenses arrière-plan: ${active.title}`,
+      {
+        expectedKind: 'expedition_claim',
+        navigate: false,
+        moduleId: 'expeditions',
+      }
+    );
+
+    if (!claimed) {
+      setExpeditionPhase('due', {
+        title: active.title,
+        resultUrl: active.resultUrl,
+        dueAt: active.dueAt,
+      });
+      return false;
+    }
+
+    const verified = await verifyBackgroundExpeditionClaim(active.resultUrl);
+    if (verified) {
+      setExpeditionPhase('ready_to_start', {
+        title: null,
+        resultUrl: null,
+        dueAt: null,
+      });
+      return true;
+    }
+
+    setExpeditionPhase('claiming', {
+      title: active.title,
+      resultUrl: active.resultUrl,
+      dueAt: active.dueAt,
+    });
+    return true;
+  }
+
+  // Tant que le formulaire de récupération existe, ne jamais considérer le
+  // résultat comme terminé. Le fallback visible reste disponible si l'auto
+  // claim est désactivé ou si le contrat change.
   setExpeditionPhase('due', {
     title: active.title,
     resultUrl: active.resultUrl,
