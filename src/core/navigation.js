@@ -619,11 +619,20 @@ function moduleEnabled(moduleId) {
       });
     }
 
+    const backgroundExpeditionOwnsCycle =
+      config.backgroundHttpMode &&
+      backgroundRouteFresh('/expeditions') &&
+      !backgroundHttpState().lastError &&
+      state.captureDecision?.action !== 'manual';
+
     if (
-      isExpeditionResultPage() ||
-      isExpeditionPreparePage() ||
-      isExpeditionIndexPage() ||
-      ['due', 'ready_to_start', 'preparing', 'starting'].includes(expeditionState.phase)
+      !backgroundExpeditionOwnsCycle &&
+      (
+        isExpeditionResultPage() ||
+        isExpeditionPreparePage() ||
+        isExpeditionIndexPage() ||
+        ['due', 'ready_to_start', 'preparing', 'starting'].includes(expeditionState.phase)
+      )
     ) {
       let priority = 7200;
       let reason = 'cycle expédition';
@@ -718,6 +727,16 @@ function moduleEnabled(moduleId) {
       lastReason: candidate?.reason || 'aucune action nécessaire',
       lastPriority: candidate?.priority || 0,
     };
+    appendActionLog(
+      candidate ? 'success' : 'info',
+      'orchestrator',
+      candidate
+        ? `Action exécutée: ${candidate.name}`
+        : 'Cycle terminé: aucune action',
+      candidate
+        ? { priority: candidate.priority, reason: candidate.reason }
+        : null
+    );
     saveState(state);
     updatePanel();
   }
@@ -748,6 +767,12 @@ function moduleEnabled(moduleId) {
             return;
           }
         } catch (error) {
+          appendActionLog(
+            'error',
+            'orchestrator',
+            `Erreur: ${candidate.name}`,
+            error?.message || String(error)
+          );
           console.error('[PokéTaka Auto] Erreur orchestrateur', candidate.name, error);
         }
       }
