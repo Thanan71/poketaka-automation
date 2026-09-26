@@ -742,12 +742,41 @@ GM_addStyle(`
 
     const current = moduleFromLocation();
     const next = nextDueModule();
+    const cycleMeta = expeditionPhaseMeta(expeditionCycle().phase);
+    const decision = panelNextDecision();
+    const team = plannedTeamNames();
+    const activeModules = MODULES.filter(module => moduleEnabled(module.id));
+    const rosterCount = state.rosterSnapshot?.pokemon?.length || 0;
+    const rosterAge = state.rosterSnapshot?.capturedAt
+      ? formatRelativeTime(state.rosterSnapshot.capturedAt)
+      : 'Jamais';
+    const missionTitle = state.selectedExpedition || state.expeditionPlan?.title || 'Aucune mission ciblée';
+    const missionPlan = state.expeditionPlan || {};
+    const missionScore = state.selectedExpeditionScore;
+    const missionReason = missionPlan.reason || state.orchestrator?.lastReason || '';
     const nextText = next
       ? `${next.module.label} · ${formatRemaining(next.dueAt)}`
-      : 'Aucune échéance connue';
+      : 'Aucune';
 
-    const modulesHtml = MODULES
-      .filter(module => moduleEnabled(module.id))
+    const activityKeys = [
+      'autoClaimExpeditions',
+      'autoStartExpeditions',
+      'autoHeal',
+      'autoHarvest',
+      'autoIncubatorClaim',
+      'autoBreedingClaim',
+      'autoProgression',
+      'autoPlant',
+    ];
+    const intelligenceKeys = ['smartTeam', 'smartCapture'];
+    const captureKeys = [
+      'autoCapture',
+      'captureNewSpecies',
+      'captureRare',
+      'captureUnknownEncounters',
+    ];
+
+    const modulesHtml = activeModules
       .map(module => {
         const display = moduleDisplayStatus(module);
         return `
@@ -760,65 +789,145 @@ GM_addStyle(`
       })
       .join('');
 
+    const teamChips = team.length
+      ? team.map(name => chipHtml(name)).join('')
+      : chipHtml('Équipe à confirmer');
+
+    const missionChips = [
+      team.length ? `Équipe · ${team.length}` : 'Roster à confirmer',
+      missionScore != null ? `Score · ${missionScore}` : null,
+      missionPlan.teamScore != null ? `Équipe · ${missionPlan.teamScore}` : null,
+    ]
+      .filter(Boolean)
+      .map(label => chipHtml(label))
+      .join('');
+
+    const captureLabel = state.captureDecision?.species
+      ? `${state.captureDecision.species} · ${state.captureDecision.action}`
+      : 'Aucune décision';
+    const captureTone = state.captureDecision?.action === 'capture'
+      ? 'ready'
+      : state.captureDecision?.action === 'manual'
+        ? 'danger'
+        : '';
+
     panel.dataset.collapsed = String(Boolean(config.panelCollapsed));
     panel.innerHTML = `
       <div class="pta-header">
         <span class="pta-dot" data-on="${config.enabled}"></span>
         <div class="pta-brand">
-          <div class="pta-title">PokéTaka Automation <span class="pta-version">v${VERSION}</span></div>
-          <div class="pta-subtitle">${config.enabled ? 'Pilotage actif' : 'En pause'} · ${escapeHtml(current?.label || 'Page PokéTaka')}</div>
+          <div class="pta-title-row">
+            <div class="pta-title">PokéTaka Automation</div>
+            <span class="pta-version">v${VERSION}</span>
+          </div>
+          <div class="pta-subtitle">
+            ${escapeHtml(current?.label || 'Page PokéTaka')} · ${config.enabled ? 'Pilotage actif' : 'En pause'}
+          </div>
         </div>
-        <button class="pta-icon-btn" data-action="collapse" title="${config.panelCollapsed ? 'Développer' : 'Réduire'} le panneau" aria-label="${config.panelCollapsed ? 'Développer' : 'Réduire'} le panneau">
-          ${config.panelCollapsed ? '▣' : '—'}
-        </button>
+        <button
+          class="pta-icon-btn"
+          data-action="collapse"
+          title="${config.panelCollapsed ? 'Développer' : 'Réduire'} le panneau"
+          aria-label="${config.panelCollapsed ? 'Développer' : 'Réduire'} le panneau"
+        >${config.panelCollapsed ? '▣' : '—'}</button>
       </div>
 
       <div class="pta-body">
-        <button class="pta-master" data-action="enabled" data-on="${config.enabled}">
-          <span>${config.enabled ? 'Automatisation active' : 'Automatisation en pause'}</span>
-          <span class="pta-master-state">${config.enabled ? 'ON' : 'OFF'}</span>
-        </button>
+        <section class="pta-status-hero" aria-label="État de l’automatisation">
+          <div class="pta-status-top">
+            <div>
+              <div class="pta-eyebrow">État du bot</div>
+              <div class="pta-status-title">
+                ${config.enabled ? 'Automatisation active' : 'Automatisation en pause'}
+              </div>
+              <div class="pta-status-copy">
+                Cycle expédition · ${escapeHtml(cycleMeta.label)}
+              </div>
+            </div>
 
-        <div class="pta-overview">
-          <div class="pta-card">
-            <div class="pta-label">Prochaine échéance</div>
-            <div class="pta-value">${escapeHtml(nextText)}</div>
+            <button
+              class="pta-master"
+              data-action="enabled"
+              data-on="${config.enabled}"
+              aria-pressed="${config.enabled}"
+              title="${config.enabled ? 'Mettre en pause' : 'Activer'} l’automatisation"
+            >
+              <span>${config.enabled ? 'ON' : 'OFF'}</span>
+              <span class="pta-master-knob">${config.enabled ? '✓' : '×'}</span>
+            </button>
           </div>
-          <div class="pta-card">
+
+          <div class="pta-next" data-tone="${decision.tone}">
+            <div class="pta-next-row">
+              <div class="pta-next-icon">${escapeHtml(decision.icon)}</div>
+              <div class="pta-next-main">
+                <div class="pta-eyebrow">Prochaine décision</div>
+                <div class="pta-next-title" title="${escapeHtml(decision.title)}">
+                  ${escapeHtml(decision.title)}
+                </div>
+                <div class="pta-next-reason" title="${escapeHtml(decision.reason)}">
+                  ${escapeHtml(decision.reason)}
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <div class="pta-metrics">
+          <div class="pta-metric">
+            <div class="pta-label">Échéance</div>
+            <div class="pta-value" title="${escapeHtml(nextText)}">${escapeHtml(nextText)}</div>
+          </div>
+          <div class="pta-metric">
             <div class="pta-label">Actions</div>
             <div class="pta-value">${state.actions} <small>· ${escapeHtml(formatRelativeTime(state.lastActionAt))}</small></div>
           </div>
-          <div class="pta-card pta-card-wide">
-            <div class="pta-label">Dernière action</div>
-            <div class="pta-value" title="${escapeHtml(state.lastAction)}">${escapeHtml(state.lastAction || 'Aucune')}</div>
-          </div>
-          <div class="pta-card">
-            <div class="pta-label">Cycle expédition</div>
-            <div class="pta-value">${escapeHtml(expeditionPhaseLabel(expeditionCycle().phase))}</div>
-          </div>
-          <div class="pta-card">
-            <div class="pta-label">Cible</div>
-            <div class="pta-value" title="${escapeHtml(state.selectedExpedition || '')}">
-              ${escapeHtml(state.selectedExpedition || 'Aucune')}
-              ${state.selectedExpeditionScore != null ? `<small> · ${state.selectedExpeditionScore}</small>` : ''}
-            </div>
+          <div class="pta-metric">
+            <div class="pta-label">Roster</div>
+            <div class="pta-value">${rosterCount || '—'} <small>· ${escapeHtml(rosterAge)}</small></div>
           </div>
         </div>
+
+        <section class="pta-mission" aria-label="Plan d’expédition">
+          <div class="pta-mission-head">
+            <div class="pta-mission-name" title="${escapeHtml(missionTitle)}">
+              ${escapeHtml(missionTitle)}
+            </div>
+            <span class="pta-badge ${cycleMeta.tone}">${escapeHtml(cycleMeta.label)}</span>
+          </div>
+
+          <div class="pta-chip-row">${missionChips || chipHtml('Aucun plan actif')}</div>
+          <div class="pta-chip-row">${teamChips}</div>
+
+          ${missionReason ? `
+            <div class="pta-status-copy" title="${escapeHtml(missionReason)}">
+              ${escapeHtml(missionReason)}
+            </div>
+          ` : ''}
+        </section>
 
         <div class="pta-actions">
-          <button class="pta-action-btn primary" data-action="run">▶ Exécuter maintenant</button>
-          <button class="pta-action-btn" data-action="ranking">☷ Voir le classement</button>
+          <button class="pta-action-btn primary" data-action="run">▶ Exécuter un cycle</button>
+          <button class="pta-action-btn" data-action="ranking">☷ Classement</button>
         </div>
 
+        <div class="pta-section-title">Surveillance</div>
+
         <details data-section="modules" ${detailsState.modules ? 'open' : ''}>
-          <summary>Modules surveillés</summary>
+          <summary>
+            <span class="pta-summary-main">Modules</span>
+            <span class="pta-summary-meta">${activeModules.length} actifs</span>
+          </summary>
           <div class="pta-modules">
             ${modulesHtml || '<div class="pta-module"><span class="pta-module-name">Aucun module actif</span></div>'}
           </div>
         </details>
 
         <details data-section="intelligence" ${detailsState.intelligence ? 'open' : ''}>
-          <summary>Décisions intelligentes</summary>
+          <summary>
+            <span class="pta-summary-main">Décisions intelligentes</span>
+            <span class="pta-summary-meta">${missionPlan.viability || '—'}</span>
+          </summary>
           <div class="pta-modules">
             <div class="pta-module">
               <span class="pta-mini-dot current"></span>
@@ -828,28 +937,38 @@ GM_addStyle(`
               </span>
             </div>
             <div class="pta-module">
-              <span class="pta-mini-dot"></span>
-              <span class="pta-module-name">Équipe prévue</span>
-              <span class="pta-module-status">
-                ${escapeHtml((state.expeditionPlan?.team || state.smartTeam?.lastSelection || []).slice(-3).join(', ') || '—')}
+              <span class="pta-mini-dot ${missionPlan.viability === 'blocked' ? 'danger' : missionPlan.viability === 'viable' ? 'ready' : ''}"></span>
+              <span class="pta-module-name">Plan équipe</span>
+              <span class="pta-module-status" title="${escapeHtml(team.join(', ') || 'À confirmer')}">
+                ${escapeHtml(team.join(', ') || 'À confirmer')}
               </span>
             </div>
             <div class="pta-module">
-              <span class="pta-mini-dot ${state.captureDecision?.action === 'capture' ? 'ready' : ''}"></span>
+              <span class="pta-mini-dot ${captureTone}"></span>
               <span class="pta-module-name">Capture</span>
               <span class="pta-module-status" title="${escapeHtml(state.captureDecision?.reason || '')}">
-                ${escapeHtml(
-                  state.captureDecision?.species
-                    ? `${state.captureDecision.species}: ${state.captureDecision.action}`
-                    : '—'
-                )}
+                ${escapeHtml(captureLabel)}
+              </span>
+            </div>
+            <div class="pta-module">
+              <span class="pta-mini-dot"></span>
+              <span class="pta-module-name">Dernière action</span>
+              <span class="pta-module-status" title="${escapeHtml(state.lastAction || '')}">
+                ${escapeHtml(state.lastAction || 'Aucune')}
               </span>
             </div>
           </div>
         </details>
 
-        <details data-section="settings" ${detailsState.settings ? 'open' : ''}>
-          <summary>Réglages automatiques</summary>
+        <div class="pta-section-title">Réglages</div>
+
+        <details data-section="automation" ${detailsState.automation ? 'open' : ''}>
+          <summary>
+            <span class="pta-summary-main">Automatisation</span>
+            <span class="pta-summary-meta">
+              ${enabledOptionCount(activityKeys)}/${activityKeys.length}
+            </span>
+          </summary>
           <div class="pta-settings">
             ${optionButton('autoClaimExpeditions', 'Récompenses')}
             ${optionButton('autoStartExpeditions', 'Expéditions')}
@@ -858,17 +977,41 @@ GM_addStyle(`
             ${optionButton('autoIncubatorClaim', 'Incubateur')}
             ${optionButton('autoBreedingClaim', 'Pension')}
             ${optionButton('autoProgression', 'Progression')}
-            ${optionButton('smartTeam', 'Équipe intelligente')}
-            ${optionButton('autoCapture', 'Captures auto')}
-            ${optionButton('smartCapture', 'Capture intelligente')}
-            ${optionButton('captureNewSpecies', 'Nouvelles espèces')}
-            ${optionButton('captureRare', 'Rares')}
-            ${optionButton('captureUnknownEncounters', 'Captures inconnues')}
             ${optionButton('autoPlant', 'Replanter')}
           </div>
         </details>
 
-        <div class="pta-footer">Smart Expedition v0.8 · mission + équipe · captures prudentes · actions destructrices bloquées</div>
+        <details data-section="smart-settings" ${detailsState['smart-settings'] ? 'open' : ''}>
+          <summary>
+            <span class="pta-summary-main">Intelligence</span>
+            <span class="pta-summary-meta">
+              ${enabledOptionCount(intelligenceKeys)}/${intelligenceKeys.length}
+            </span>
+          </summary>
+          <div class="pta-settings">
+            ${optionButton('smartTeam', 'Équipe intelligente')}
+            ${optionButton('smartCapture', 'Capture intelligente')}
+          </div>
+        </details>
+
+        <details data-section="capture-settings" ${detailsState['capture-settings'] ? 'open' : ''}>
+          <summary>
+            <span class="pta-summary-main">Captures</span>
+            <span class="pta-summary-meta">
+              ${enabledOptionCount(captureKeys)}/${captureKeys.length}
+            </span>
+          </summary>
+          <div class="pta-settings">
+            ${optionButton('autoCapture', 'Captures auto')}
+            ${optionButton('captureNewSpecies', 'Nouvelles espèces')}
+            ${optionButton('captureRare', 'Rares')}
+            ${optionButton('captureUnknownEncounters', 'Captures inconnues')}
+          </div>
+        </details>
+
+        <div class="pta-footer">
+          Smart Expedition · GitHub Raw · actions destructrices bloquées
+        </div>
       </div>
     `;
   }
