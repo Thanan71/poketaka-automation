@@ -113,14 +113,44 @@ GM_addStyle(`
       color: var(--pta-text);
     }
 
+    #pta-panel .pta-tabs {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      padding: 7px 10px;
+      border-bottom: 1px solid var(--pta-border);
+      background: rgba(255,255,255,.018);
+    }
+    #pta-panel .pta-tab-btn {
+      border: 1px solid transparent;
+      border-radius: 9px;
+      padding: 7px 9px;
+      background: transparent;
+      color: var(--pta-muted);
+      cursor: pointer;
+      font-size: 10px;
+      font-weight: 760;
+    }
+    #pta-panel .pta-tab-btn[data-active="true"] {
+      border-color: rgba(96,165,250,.20);
+      background: var(--pta-blue-soft);
+      color: #dbeafe;
+    }
+    #pta-panel .pta-tab-count {
+      margin-left: 4px;
+      opacity: .75;
+      font-size: 9px;
+    }
+
     #pta-panel .pta-body {
-      max-height: calc(min(760px, 100vh - 36px) - 62px);
+      max-height: calc(min(760px, 100vh - 36px) - 104px);
       overflow: auto;
       padding: 12px;
       scrollbar-width: thin;
       scrollbar-color: rgba(148,163,184,.35) transparent;
     }
-    #pta-panel[data-collapsed="true"] .pta-body { display: none; }
+    #pta-panel[data-collapsed="true"] .pta-body,
+    #pta-panel[data-collapsed="true"] .pta-tabs { display: none; }
     #pta-panel[data-collapsed="true"] { width: min(292px, calc(100vw - 24px)); }
 
     #pta-panel .pta-status-hero {
@@ -665,6 +695,97 @@ GM_addStyle(`
     #pta-panel .pta-mini-dot.wait { background: var(--pta-amber); }
     #pta-panel .pta-mini-dot.current { background: var(--pta-blue); }
     #pta-panel .pta-mini-dot.danger { background: var(--pta-red); }
+
+    #pta-panel .pta-log-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 9px;
+    }
+    #pta-panel .pta-log-toolbar-copy {
+      min-width: 0;
+    }
+    #pta-panel .pta-log-toolbar-copy strong {
+      display: block;
+      font-size: 12px;
+    }
+    #pta-panel .pta-log-toolbar-copy small {
+      display: block;
+      margin-top: 2px;
+      color: var(--pta-muted);
+      font-size: 9px;
+    }
+    #pta-panel .pta-log-clear {
+      flex: 0 0 auto;
+      border: 1px solid var(--pta-border);
+      border-radius: 9px;
+      padding: 6px 8px;
+      background: rgba(255,255,255,.035);
+      color: var(--pta-muted);
+      cursor: pointer;
+      font-size: 9px;
+      font-weight: 760;
+    }
+    #pta-panel .pta-log-list {
+      display: grid;
+      gap: 7px;
+    }
+    #pta-panel .pta-log-entry {
+      padding: 9px 10px;
+      border: 1px solid var(--pta-border);
+      border-radius: 11px;
+      background: var(--pta-surface);
+    }
+    #pta-panel .pta-log-entry[data-level="success"] {
+      border-color: rgba(34,197,94,.20);
+    }
+    #pta-panel .pta-log-entry[data-level="warning"] {
+      border-color: rgba(245,158,11,.22);
+    }
+    #pta-panel .pta-log-entry[data-level="error"] {
+      border-color: rgba(239,68,68,.24);
+    }
+    #pta-panel .pta-log-entry-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    #pta-panel .pta-log-category {
+      color: #cbd5e1;
+      font-size: 9px;
+      font-weight: 820;
+      letter-spacing: .05em;
+      text-transform: uppercase;
+    }
+    #pta-panel .pta-log-time {
+      color: var(--pta-faint);
+      font-size: 9px;
+      white-space: nowrap;
+    }
+    #pta-panel .pta-log-message {
+      margin-top: 4px;
+      font-size: 10px;
+      font-weight: 700;
+      line-height: 1.4;
+    }
+    #pta-panel .pta-log-details {
+      margin-top: 4px;
+      color: var(--pta-muted);
+      font-size: 9px;
+      line-height: 1.45;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+    #pta-panel .pta-log-empty {
+      padding: 20px 12px;
+      border: 1px dashed var(--pta-border);
+      border-radius: 12px;
+      color: var(--pta-muted);
+      text-align: center;
+      font-size: 10px;
+    }
 
     #pta-panel .pta-footer {
       margin-top: 10px;
