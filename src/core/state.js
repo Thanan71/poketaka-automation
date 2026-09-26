@@ -41,6 +41,7 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
   function resetCaptureDecision(reason = null) {
     const previous = state.captureDecision || emptyCaptureDecision();
     const wasActive = previous.action !== 'none' || Boolean(previous.species);
+    if (!wasActive) return false;
 
     state.captureDecision = {
       ...emptyCaptureDecision(),
@@ -77,8 +78,10 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
     const hadSelection = Boolean(
       previous.selectedExpedition ||
       previous.planTitle ||
-      previous.selectedExpeditionScore != null
+      previous.selectedExpeditionScore != null ||
+      (previous.planViability && previous.planViability !== 'unknown')
     );
+    if (!hadSelection) return false;
 
     state.selectedExpedition = null;
     state.selectedExpeditionScore = null;
