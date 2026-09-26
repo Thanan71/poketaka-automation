@@ -1,6 +1,8 @@
 import fs from 'node:fs';
 
 const source = fs.readFileSync('src/features/pokemon/progression.js', 'utf8');
+const backgroundSource = fs.readFileSync('src/core/background.js', 'utf8');
+const navigationSource = fs.readFileSync('src/core/navigation.js', 'utf8');
 
 const config = {
   autoLevelPokemon: true,
@@ -53,6 +55,8 @@ const api = new Function(
   'expeditionCycle',
   `${source}
   return {
+    pokemonNumber,
+    expeditionHasPriorityOverPokemonProgression,
     pokemonProgressionPriorityRecords,
     pokemonProgressionScanDue,
   };`
@@ -74,6 +78,23 @@ expedition = { phase: 'running', title: 'Route 1' };
 assert(
   api.pokemonProgressionScanDue() === false,
   'progression must wait while an expedition is running'
+);
+
+assert(api.pokemonNumber('Niveau 12') === 12, 'level parser must read integers');
+assert(api.pokemonNumber('1 192 Poussières') === 1192, 'resource parser must read spaced thousands');
+assert(api.pokemonNumber('1\u00a0192') === 1192, 'resource parser must read non-breaking spaces');
+
+expedition = { phase: 'ready_to_start', title: null };
+state.expeditionPlan.viability = 'viable';
+assert(
+  api.pokemonProgressionScanDue() === false,
+  'a free expedition slot must have priority over routine Pokémon progression'
+);
+
+state.expeditionPlan.viability = 'blocked';
+assert(
+  api.pokemonProgressionScanDue({ allowExpeditionFallback: true }) === true,
+  'Pokémon progression may run only as an explicit fallback for a blocked expedition team'
 );
 
 expedition = { phase: 'ready_to_start', title: null };
@@ -115,6 +136,27 @@ assert(
   'evolution candy reserve guard must be enforced'
 );
 
+assert(
+  backgroundSource.includes("action: 'evolve_done'") &&
+  backgroundSource.includes("action: 'level_up_done'") &&
+  backgroundSource.includes("markPokemonScanned(context.id"),
+  'successful background upgrades must mark the Pokémon as processed'
+);
+
+assert(
+  backgroundSource.includes("state.expeditionPlan?.viability === 'blocked'") &&
+  backgroundSource.includes("allowExpeditionFallback: true"),
+  'background Pokémon progression must only be a fallback after a blocked team plan'
+);
+
+assert(
+  navigationSource.includes("expeditionHasPriorityOverPokemonProgression()") &&
+  navigationSource.includes("pokemonFallbackNeeded"),
+  'visible orchestration must keep expedition priority above stale Pokémon progression state'
+);
+
 console.log('Pokémon progression scenarios: OK');
-console.log('Active expedition wait rule: OK');
+console.log('Expedition relaunch priority: OK');
+console.log('Numeric level/resource parsing: OK');
+console.log('One-upgrade-per-scan rule: OK');
 console.log('Planned-team resource targeting: OK');
