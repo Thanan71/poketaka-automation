@@ -463,8 +463,34 @@ async function handlePokemonProfileProgression() {
   }
 
   const level = pokemonLevelUpOption();
+  const evolutionCandyGoal = evolutions.length === 1
+    ? (() => {
+        const evolution = evolutions[0];
+        const candy = evolution.requirements.find(requirement =>
+          normalizeText(requirement.label).includes('bonbon')
+        );
+        const otherMissing = evolution.requirements.some(requirement =>
+          requirement.missing &&
+          !normalizeText(requirement.label).includes('bonbon')
+        );
 
-  if (config.autoLevelPokemon && level.available) {
+        if (!candy || otherMissing || !candy.missing) return null;
+
+        return {
+          target: evolution.target,
+          required: candy.required,
+          available: candy.available,
+        };
+      })()
+    : null;
+
+  const levelConsumesCandy = Number(level.candy?.required || 0) > 0;
+  const preserveCandyForEvolution =
+    config.preserveEvolutionCandies &&
+    evolutionCandyGoal &&
+    levelConsumesCandy;
+
+  if (config.autoLevelPokemon && level.available && !preserveCandyForEvolution) {
     const dialog = document.querySelector('#pokemon-level-dialog');
 
     if (!dialog?.open) {
@@ -516,7 +542,11 @@ async function handlePokemonProfileProgression() {
     action: 'none',
     reason: [
       config.autoEvolvePokemon ? evolutionReason : 'Évolution auto désactivée',
-      config.autoLevelPokemon ? level.reason : 'Renforcement auto désactivé',
+      preserveCandyForEvolution
+        ? `Bonbons réservés pour ${evolutionCandyGoal.target || 'l’évolution'} (${evolutionCandyGoal.available ?? '?'} / ${evolutionCandyGoal.required ?? '?'})`
+        : config.autoLevelPokemon
+          ? level.reason
+          : 'Renforcement auto désactivé',
     ].filter(Boolean).join(' · '),
   });
 
