@@ -1,6 +1,6 @@
 {
   "name": "poketaka-automation",
-  "version": "0.8.1",
+  "version": "0.8.2",
   "private": true,
   "description": "Tampermonkey automation assistant for poketaka.fr",
   "scripts": {
