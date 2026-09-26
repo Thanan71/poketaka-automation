@@ -107,6 +107,12 @@ assert(
 );
 
 assert(
+  backgroundSource.includes("['due', 'ready_to_start', 'preparing', 'starting']") &&
+  backgroundSource.includes("backgroundObserveExpeditions({\n        force: true"),
+  'actionable expedition phases must trigger immediate silent background handling in the same cycle'
+);
+
+assert(
   navigationSource.includes('backgroundExpeditionOwnsCycle') &&
   navigationSource.includes("state.captureDecision?.action !== 'manual'"),
   'silent background expedition handling must suppress visible expedition fallback unless manual intervention is required'
