@@ -2,7 +2,7 @@
 (() => {
   'use strict';
 
-  const VERSION = "0.8.4";
+  const VERSION = "0.8.5";
 
 // ---- src/core/config.js ----
 const STORAGE_KEY = 'poketaka-automation:config';
@@ -3366,10 +3366,15 @@ GM_addStyle(`
         <div class="pta-brand">
           <div class="pta-title-row">
             <div class="pta-title">PokéTaka Automation</div>
-            <span class="pta-version">v${VERSION}</span>
+            <span class="pta-version" title="Runtime v${VERSION} · Loader v${escapeHtml(GM_info?.script?.version || VERSION)}">
+              v${VERSION}
+            </span>
           </div>
           <div class="pta-subtitle">
             ${escapeHtml(current?.label || 'Page PokéTaka')} · ${config.enabled ? 'Pilotage actif' : 'En pause'}
+            ${GM_info?.script?.version && GM_info.script.version !== VERSION
+              ? ` · Loader ${escapeHtml(GM_info.script.version)}`
+              : ''}
           </div>
         </div>
         <button
