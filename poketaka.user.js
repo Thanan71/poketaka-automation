@@ -1030,14 +1030,40 @@
   }
 
   async function captureEncounter() {
-    if (!config.autoCapture) return false;
-    const button = findClickable([
-      'capturer',
-      'capture',
-      'lancer pokeball',
-      'throw pokeball',
-    ], document, { exclude: ['fuir', 'run', 'berry', 'baie'] });
-    return button ? clickElement(button, 'Tentative de capture') : false;
+    const context = captureContext();
+    if (!context) return false;
+
+    const decision = decideCapture(context);
+    state.captureDecision = {
+      action: decision.action,
+      reason: decision.reason,
+      species: context.species,
+    };
+    saveState(state);
+    updatePanel();
+
+    if (decision.action === 'capture' && context.captureButton) {
+      return clickElement(
+        context.captureButton,
+        `Capture: ${context.species} — ${decision.reason}`
+      );
+    }
+
+    if (decision.action === 'skip' && context.skipButton) {
+      return clickElement(
+        context.skipButton,
+        `Capture ignorée: ${context.species} — ${decision.reason}`
+      );
+    }
+
+    if (decision.action === 'manual') {
+      setExpeditionPhase('awaiting_capture');
+      state.lastAction = `Capture manuelle: ${context.species} — ${decision.reason}`;
+      saveState(state);
+      updatePanel();
+    }
+
+    return false;
   }
 
   function expeditionPrepareLink(card) {
