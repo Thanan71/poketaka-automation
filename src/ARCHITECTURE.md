@@ -8,8 +8,9 @@ La logique métier ne doit plus y être ajoutée.
 - `src/core/config.js` — configuration, constantes et table des types.
 - `src/core/state.js` — état persistant et primitives communes.
 - `src/core/dom.js` — détection et clics DOM sûrs.
-- `src/features/expeditions/cycle.js` — machine d'état expédition, résultats, équipes et captures.
-- `src/features/expeditions/catalog.js` — catalogue, scoring et stratégie de choix.
+- `src/features/expeditions/team.js` — snapshot du roster, efficacité des types, viabilité et composition d'équipe.
+- `src/features/expeditions/cycle.js` — machine d'état expédition, résultats et captures.
+- `src/features/expeditions/catalog.js` — catalogue, scoring mission + équipe et stratégie de choix.
 - `src/features/activities.js` — soins, serre, incubateur et pension.
 - `src/core/navigation.js` — timers, navigation intelligente, orchestrateur et scheduler.
 - `src/ui/panel.js` — dashboard Tampermonkey.
