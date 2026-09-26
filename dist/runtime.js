@@ -2,7 +2,7 @@
 (() => {
   'use strict';
 
-  const VERSION = "0.9.5";
+  const VERSION = "0.9.6";
 
 // ---- src/core/config.js ----
 const STORAGE_KEY = 'poketaka-automation:config';
@@ -4859,7 +4859,7 @@ function detachedActiveExpeditionSnapshot(root) {
   const card = root.querySelector('.mission-slot-card--occupied');
   if (!card) return null;
 
-  const title = normalizeText(card.querySelector('h3')?.textContent || '') || 'expedition active';
+  const title = card.querySelector('h3')?.textContent?.trim() || 'Expédition active';
   const timer = card.querySelector('time[data-countdown][data-countdown-format="expedition"]');
   const progress = card.querySelector('progress[data-mission-progress][data-progress-end]');
   const follow = card.querySelector('a[href*="/expeditions/results/"]');
@@ -5074,6 +5074,15 @@ async function backgroundObserveExpeditions() {
       resultUrl: active.resultUrl,
       dueAt,
     });
+
+    const activeTitleChanged =
+      normalizeText(state.selectedExpedition || '') !==
+      normalizeText(active.title || '');
+
+    if (activeTitleChanged) {
+      state.selectedExpedition = active.title;
+      state.selectedExpeditionScore = null;
+    }
 
     if (
       normalizeText(state.expeditionPlan?.title || '') !==
@@ -7792,9 +7801,16 @@ GM_addStyle(`
     const rosterAge = state.rosterSnapshot?.capturedAt
       ? formatRelativeTime(state.rosterSnapshot.capturedAt)
       : 'Jamais';
-    const missionTitle = state.selectedExpedition || state.expeditionPlan?.title || 'Aucune mission ciblée';
+    const cycle = expeditionCycle();
+    const missionTitle = ['running', 'due', 'result', 'claiming', 'opening_result']
+      .includes(cycle.phase)
+      ? (cycle.title || state.expeditionPlan?.title || state.selectedExpedition || 'Aucune mission ciblée')
+      : (state.expeditionPlan?.title || state.selectedExpedition || 'Aucune mission ciblée');
     const missionPlan = state.expeditionPlan || {};
-    const missionScore = state.selectedExpeditionScore;
+    const missionScore =
+      normalizeText(state.selectedExpedition || '') === normalizeText(missionTitle || '')
+        ? state.selectedExpeditionScore
+        : null;
     const missionReason = missionPlan.reason || state.orchestrator?.lastReason || '';
     const gym = gymCycle();
     const showGymCard =
