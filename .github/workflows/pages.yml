@@ -1,0 +1,66 @@
+name: Publish Tampermonkey
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: poketaka-pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Compute Tampermonkey version
+        id: version
+        shell: bash
+        run: |
+          VERSION="$(date -u +'%Y.%-m.%-d').${GITHUB_RUN_NUMBER}"
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+          echo "Publishing PokéTaka Automation ${VERSION}"
+
+      - name: Build distribution
+        env:
+          PTA_VERSION: ${{ steps.version.outputs.version }}
+        run: npm run build
+
+      - name: Validate distribution
+        run: |
+          node --check dist/runtime.js
+          node --check dist/poketaka.user.js
+          grep -F "@version      ${{ steps.version.outputs.version }}" dist/poketaka.user.js
+          grep -F "const VERSION = '${{ steps.version.outputs.version }}'" dist/runtime.js
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload distribution
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: dist
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
