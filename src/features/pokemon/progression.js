@@ -421,7 +421,7 @@ async function handlePokemonProfileProgression() {
     const evolution = affordableEvolutions[0];
 
     if (config.directHttpActions) {
-      markPokemonScanned(context.id, {
+      setPokemonProgression({
         phase: 'evolving',
         targetId: context.id,
         targetName: context.name,
@@ -431,11 +431,24 @@ async function handlePokemonProfileProgression() {
         lastEvolutionAt: now(),
       });
 
-      return submitObservedForm(
+      const submitted = await submitObservedForm(
         evolution.form,
         `Évolution HTTP: ${context.name} → ${evolution.target || 'évolution'}`,
         { expectedKind: 'pokemon_evolve' }
       );
+
+      if (!submitted) {
+        markPokemonScanned(context.id, {
+          phase: 'blocked',
+          targetId: context.id,
+          targetName: context.name,
+          targetLevel: context.level,
+          action: 'evolve_failed',
+          reason: httpTransportState().lastError || 'Évolution HTTP non soumise',
+        });
+      }
+
+      return submitted;
     }
 
     const dialog = document.querySelector('#pokemon-evolution-dialog');
@@ -519,7 +532,7 @@ async function handlePokemonProfileProgression() {
 
   if (config.autoLevelPokemon && level.available && !preserveCandyForEvolution) {
     if (config.directHttpActions) {
-      markPokemonScanned(context.id, {
+      setPokemonProgression({
         phase: 'leveling',
         targetId: context.id,
         targetName: context.name,
@@ -529,11 +542,24 @@ async function handlePokemonProfileProgression() {
         lastUpgradeAt: now(),
       });
 
-      return submitObservedForm(
+      const submitted = await submitObservedForm(
         level.form,
         `Renforcement HTTP: ${context.name} → niveau ${level.targetLevel}`,
         { expectedKind: 'pokemon_level_up' }
       );
+
+      if (!submitted) {
+        markPokemonScanned(context.id, {
+          phase: 'blocked',
+          targetId: context.id,
+          targetName: context.name,
+          targetLevel: context.level,
+          action: 'level_up_failed',
+          reason: httpTransportState().lastError || 'Renforcement HTTP non soumis',
+        });
+      }
+
+      return submitted;
     }
 
     const dialog = document.querySelector('#pokemon-level-dialog');
