@@ -6,6 +6,7 @@ const navigationSource = fs.readFileSync('src/core/navigation.js', 'utf8');
 const teamSource = fs.readFileSync('src/features/expeditions/team.js', 'utf8');
 const catalogSource = fs.readFileSync('src/features/expeditions/catalog.js', 'utf8');
 const pokemonSource = fs.readFileSync('src/features/pokemon/progression.js', 'utf8');
+const panelSource = fs.readFileSync('src/ui/panel.js', 'utf8');
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -41,6 +42,18 @@ assert(
   backgroundSource.includes("viability: assessment.plan.known") &&
   backgroundSource.includes("normalizeText(state.expeditionPlan?.title || '') !=="),
   'background expedition plan must stay synchronized with prepared and active missions'
+);
+
+assert(
+  backgroundSource.includes("state.selectedExpedition = active.title") &&
+  backgroundSource.includes("state.selectedExpeditionScore = null"),
+  'observed active expedition must replace stale selected expedition metadata'
+);
+
+assert(
+  panelSource.includes("['running', 'due', 'result', 'claiming', 'opening_result']") &&
+  panelSource.includes("cycle.title || state.expeditionPlan?.title"),
+  'panel mission card must prefer the actually active expedition'
 );
 
 assert(
@@ -88,5 +101,7 @@ console.log('Background GET whitelist: OK');
 console.log('Detached HTML parsing: OK');
 console.log('Expedition/league/collection background observation: OK');
 console.log('Background expedition-plan synchronization: OK');
+console.log('Observed active-expedition selection sync: OK');
+console.log('Panel active mission precedence: OK');
 console.log('Fresh-route navigation suppression + fallback: OK');
 console.log('Background POST actions without page changes: OK');
