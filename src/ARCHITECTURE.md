@@ -8,7 +8,8 @@ La logique métier ne doit plus y être ajoutée.
 - `src/core/config.js` — configuration, constantes et table des types.
 - `src/core/state.js` — état persistant et primitives communes.
 - `src/core/dom.js` — détection et clics DOM sûrs.
-- `src/core/http.js` — soumission HTTP same-origin des formulaires PokéTaka observés, avec whitelist et télémétrie.
+- `src/core/http.js` — GET/POST same-origin des routes PokéTaka observées, avec whitelist, cache et télémétrie.
+- `src/core/background.js` — observation hors écran, parsing HTML détaché et orchestration sans navigation visible.
 - `src/account/snapshot.js` — état global observé du compte : niveau, roster, Pokédex, Ligue et progression d'expéditions.
 - `src/planner/goals.js` — objectifs globaux, dépendances de progression et bonus de priorité pour l'orchestrateur.
 - `src/features/pokemon/progression.js` — scan de la collection, renforcement sûr, évolution unique et protection des ressources.
@@ -143,3 +144,28 @@ Routes actuellement autorisées :
 Les routes de transfert, achat, vente, échange, suppression ou abandon ne sont pas autorisées.
 
 Pour les équipes d'expédition et d'Arène, le planner injecte directement les IDs choisis dans `pokemon_public_ids[]`, ce qui évite les clics et changements de sélection intermédiaires.
+
+
+## Observation hors écran v0.9.3
+
+Le Goal Planner peut désormais collecter ses informations sans déplacer l'utilisateur.
+
+Flux général :
+
+`GET page index → DOMParser → analyse → GET page de détail/préparation → calcul → POST formulaire`
+
+Les pages actuellement observables en arrière-plan sont :
+
+- `/expeditions`
+- `/expeditions/{slug}/prepare`
+- `/expeditions/results/{id}`
+- `/league`
+- `/gyms/{slug}/prepare`
+- `/collection`
+- `/collection/{id}`
+
+Le document HTML est parsé dans un document détaché avec un `<base>` correspondant à l'URL finale afin que les liens et formulaires restent résolvables.
+
+Une route visible n'est masquée dans la navigation que lorsqu'une observation réussie de cette route est encore fraîche. En cas d'échec, d'expiration ou d'absence de contrat serveur exploitable, le comportement DOM/navigation historique redevient automatiquement disponible.
+
+Les résultats d'expédition sont également inspectés hors écran. Lorsque les récompenses sont déjà récupérées et qu'une capture est disponible, la décision de capture peut être exécutée directement. Une capture manuelle ou un POST échoué conserve le fallback visible.
