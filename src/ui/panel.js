@@ -828,6 +828,54 @@ GM_addStyle(`
     return keys.filter(key => Boolean(config[key])).length;
   }
 
+  function captureActionMeta(action) {
+    const map = {
+      capture: { label: 'Capturer', tone: 'ready' },
+      skip: { label: 'Passer', tone: 'wait' },
+      ignore: { label: 'Ignorer', tone: 'wait' },
+      manual: { label: 'Manuel', tone: 'danger' },
+      none: { label: 'Aucune action', tone: 'neutral' },
+    };
+    return map[action] || map.none;
+  }
+
+  function captureModeLabel() {
+    if (!config.autoCapture) return 'Manuel';
+    if (!config.smartCapture) return 'Auto simple';
+    return 'Intelligent';
+  }
+
+  function liveCapturePanelState() {
+    let context = null;
+    if (isExpeditionResultPage()) {
+      try {
+        context = captureContext();
+      } catch {
+        context = null;
+      }
+    }
+
+    if (context) {
+      const decision = decideCapture(context);
+      return {
+        active: true,
+        ...captureDecisionSnapshot(context, decision),
+      };
+    }
+
+    return {
+      active: false,
+      ...(state.captureDecision || {}),
+    };
+  }
+
+  function stepCaptureSetting(key, delta, min, max) {
+    const current = Number(config[key] ?? min);
+    config[key] = Math.max(min, Math.min(max, current + delta));
+    saveConfig(config);
+    updatePanel();
+  }
+
   function ensurePanel() {
     if (document.getElementById('pta-panel')) return;
     const panel = document.createElement('div');
@@ -852,6 +900,26 @@ GM_addStyle(`
         config.panelCollapsed = !config.panelCollapsed;
         saveConfig(config);
         updatePanel();
+        return;
+      }
+
+      if (action === 'capture-reserve-dec') {
+        stepCaptureSetting('minBallReserve', -1, 0, 99);
+        return;
+      }
+
+      if (action === 'capture-reserve-inc') {
+        stepCaptureSetting('minBallReserve', 1, 0, 99);
+        return;
+      }
+
+      if (action === 'capture-iv-dec') {
+        stepCaptureSetting('minCaptureIvScore', -5, 0, 100);
+        return;
+      }
+
+      if (action === 'capture-iv-inc') {
+        stepCaptureSetting('minCaptureIvScore', 5, 0, 100);
         return;
       }
 
