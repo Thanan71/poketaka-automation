@@ -8,6 +8,7 @@ const domSource = fs.readFileSync('src/core/dom.js', 'utf8');
 const cycleSource = fs.readFileSync('src/features/expeditions/cycle.js', 'utf8');
 const backgroundSource = fs.readFileSync('src/core/background.js', 'utf8');
 const panelSource = fs.readFileSync('src/ui/panel.js', 'utf8');
+const catalogSource = fs.readFileSync('src/features/expeditions/catalog.js', 'utf8');
 
 function normalizeText(value = '') {
   return String(value)
@@ -32,6 +33,45 @@ const resultApi = new Function(
   'normalizeText',
   `${resultSource}\nreturn { expeditionResultState, expeditionRewardsRecovered };`
 )(normalizeText);
+
+const catalogApi = new Function(
+  'isVisible',
+  'findClickable',
+  'elementText',
+  `${catalogSource}\nreturn { expeditionPrepareLink, expeditionCards };`
+)(
+  () => false,
+  () => null,
+  el => normalizeText(el?.textContent || '')
+);
+
+const detachedCatalogHtml = `
+<!doctype html>
+<html>
+  <body>
+    <section class="mission-catalog mission-tabset__panel" data-panel="available">
+      <div class="mission-catalog__grid">
+        <article class="mission-card">
+          <h3>Forêt Épines</h3>
+          <a class="primary-button" href="https://poketaka.fr/expeditions/thorn_forest/prepare">
+            Préparer l’expédition
+          </a>
+        </article>
+      </div>
+    </section>
+  </body>
+</html>`;
+
+const detachedCatalog = parse(detachedCatalogHtml);
+const detachedCards = catalogApi.expeditionCards(detachedCatalog);
+assert(
+  detachedCards.length === 1,
+  'detached expedition catalog must keep native /prepare links even when isVisible() is false'
+);
+assert(
+  catalogApi.expeditionPrepareLink(detachedCards[0])?.getAttribute('href')?.includes('/thorn_forest/prepare'),
+  'detached expedition ranking must resolve the real prepare URL'
+);
 
 const pendingClaimHtml = `
 <!doctype html>
@@ -161,3 +201,4 @@ console.log('HTTP/DOM duplicate-action guards: OK');
 console.log('Visible/background result reconciliation: OK');
 console.log('Verified claim relaunch continuation: OK');
 console.log('Resolved capture panel cleanup: OK');
+console.log('Detached expedition catalog prepare detection: OK');
