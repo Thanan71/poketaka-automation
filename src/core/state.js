@@ -25,6 +25,7 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
       lastActionAt: 0,
       lastAction: 'aucune',
       lastBotClickAt: 0,
+      actionLog: [],
       httpTransport: {
         requests: 0,
         lastAt: 0,
@@ -205,6 +206,35 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
     GM_setValue(STATE_KEY, state);
   }
 
+  function actionLogEntries() {
+    return Array.isArray(state.actionLog) ? state.actionLog : [];
+  }
+
+  function appendActionLog(level, category, message, details = null) {
+    const entry = {
+      id: `${now()}-${Math.random().toString(36).slice(2, 8)}`,
+      at: now(),
+      level: level || 'info',
+      category: category || 'bot',
+      message: String(message || ''),
+      details: details == null
+        ? null
+        : typeof details === 'string'
+          ? details
+          : JSON.stringify(details),
+    };
+
+    state.actionLog = [entry, ...actionLogEntries()].slice(0, 120);
+    saveState(state);
+    return entry;
+  }
+
+  function clearActionLog() {
+    state.actionLog = [];
+    saveState(state);
+    updatePanel();
+  }
+
   function expeditionCycle() {
     if (!state.expeditionCycle || typeof state.expeditionCycle !== 'object') {
       state.expeditionCycle = {
@@ -230,6 +260,15 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
     };
     saveState(state);
     updatePanel();
+    appendActionLog(
+      'info',
+      'expedition',
+      `Cycle expédition → ${phase}`,
+      {
+        title: state.expeditionCycle.title,
+        dueAt: state.expeditionCycle.dueAt,
+      }
+    );
     log('Cycle expédition:', state.expeditionCycle);
   }
 
