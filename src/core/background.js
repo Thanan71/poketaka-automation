@@ -301,18 +301,15 @@ function detachedCaptureDecision(root) {
     encounter.querySelector('.mission-encounter__identity h3, h3')?.textContent?.trim() ||
     'Pokémon rencontré';
 
-  let isNew = null;
-  if (/absente? du pokedex|nouvelle espece|premiere capture|jamais capture|new species/.test(text)) {
-    isNew = true;
-  } else if (/presente? dans le pokedex|deja capture|already caught|already owned/.test(text)) {
-    isNew = false;
-  }
-
+  const isNew = encounterOwnershipState(encounter, text);
   const rarity =
-    text.match(/\b(commun|peu commun|rare|epique|legendaire|mythique|common|uncommon|epic|legendary|mythic)\b/)?.[1] ||
-    '';
+    normalizeText(encounter.getAttribute('data-rarity') || '') ||
+    (text.match(/\b(commun|peu commun|rare|epique|legendaire|mythique|common|uncommon|epic|legendary|mythic)\b/)?.[1] || '');
 
-  const ivRaw = text.match(/(?:iv|ivs)[^\d]{0,12}(\d+(?:[.,]\d+)?)/i)?.[1];
+  const ivRaw =
+    encounter.getAttribute('data-iv-total') ||
+    encounter.getAttribute('data-iv-score') ||
+    text.match(/(?:iv|ivs)[^\d]{0,12}(\d+(?:[.,]\d+)?)/i)?.[1];
   const ivScore = parseNumber(ivRaw);
 
   const checked = form.querySelector('input[name="ball_code"]:checked');
@@ -333,61 +330,38 @@ function detachedCaptureDecision(root) {
   const attemptsMatch = attemptsText.match(/(\d+)\s*(?:tentative|tentatives|attempt|attempts)/i);
   const attemptsRemaining = attemptsMatch ? Number(attemptsMatch[1]) : null;
 
-  let action = 'manual';
-  let reason = 'Capture auto désactivée';
+  const captureButton = form.querySelector(
+    'button[type="submit"], input[type="submit"]'
+  );
 
-  if (config.autoCapture) {
-    if (
-      ballReserve != null &&
-      ballReserve <= config.minBallReserve
-    ) {
-      action = 'ignore';
-      reason = `Réserve protégée · ${ballReserve}/${config.minBallReserve}`;
-    } else if (!config.smartCapture) {
-      action = 'capture';
-      reason = captureChance != null
-        ? `Capture auto simple · ${captureChance}%`
-        : 'Capture auto simple';
-    } else if (config.captureNewSpecies && isNew === true) {
-      action = 'capture';
-      reason = captureChance != null
-        ? `Nouvelle espèce · ${captureChance}%`
-        : 'Nouvelle espèce';
-    } else if (
-      config.captureRare &&
-      /rare|epique|legendaire|mythique|epic|legendary|mythic/.test(rarity)
-    ) {
-      action = 'capture';
-      reason = `Rareté · ${rarity}`;
-    } else if (
-      ivScore != null &&
-      ivScore >= config.minCaptureIvScore &&
-      ivScore <= 100
-    ) {
-      action = 'capture';
-      reason = `IV ${ivScore} ≥ ${config.minCaptureIvScore}`;
-    } else if (config.captureUnknownEncounters && isNew == null) {
-      action = 'capture';
-      reason = 'Rencontre inconnue autorisée';
-    } else {
-      action = 'ignore';
-      reason = isNew === false
-        ? 'Doublon non prioritaire'
-        : 'Aucun critère intelligent validé';
-    }
-  }
-
-  return {
+  const context = {
+    root: encounter,
     form,
+    captureButton,
+    skipButton: null,
     species,
     isNew,
     rarity,
     ivScore,
+    ballCode: checked?.value || null,
+    ballName:
+      label?.querySelector('span')?.textContent?.trim() ||
+      selected?.querySelector('span')?.textContent?.trim() ||
+      checked?.value ||
+      null,
     ballReserve,
+    ballMultiplierBps: parseNumber(checked?.getAttribute('data-multiplier-bps')),
     captureChance,
     attemptsRemaining,
-    action,
-    reason,
+    text,
+  };
+
+  const decision = decideCapture(context);
+
+  return {
+    ...context,
+    action: decision.action,
+    reason: decision.reason,
   };
 }
 
