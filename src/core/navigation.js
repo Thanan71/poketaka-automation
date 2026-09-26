@@ -727,16 +727,14 @@ function moduleEnabled(moduleId) {
       lastReason: candidate?.reason || 'aucune action nécessaire',
       lastPriority: candidate?.priority || 0,
     };
-    appendActionLog(
-      candidate ? 'success' : 'info',
-      'orchestrator',
-      candidate
-        ? `Action exécutée: ${candidate.name}`
-        : 'Cycle terminé: aucune action',
-      candidate
-        ? { priority: candidate.priority, reason: candidate.reason }
-        : null
-    );
+    if (candidate) {
+      appendActionLog(
+        'success',
+        'orchestrator',
+        `Action exécutée: ${candidate.name}`,
+        { priority: candidate.priority, reason: candidate.reason }
+      );
+    }
     saveState(state);
     updatePanel();
   }
