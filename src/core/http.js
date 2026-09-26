@@ -194,7 +194,7 @@ async function submitObservedForm(
   // Les actions critiques observées utilisent une clé d'idempotence. On la
   // conserve telle quelle et on refuse d'en inventer une.
   if (
-    ['capture', 'expedition_launch', 'gym_challenge', 'pokemon_level_up', 'pokemon_evolve']
+    ['capture', 'expedition_launch', 'gym_challenge', 'pokemon_level_up', 'pokemon_evolve', 'pokemon_item']
       .includes(kind) &&
     !idempotency
   ) {
