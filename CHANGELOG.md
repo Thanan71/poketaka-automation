@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.8.7 - 2026-09-26
+
+- Automatisation du Circuit des Arènes et du combat quotidien.
+- Détection exacte de l'état "Combat du jour disponible" et de l'arène actuellement accessible.
+- Ouverture automatique de "Préparer le combat".
+- Composition automatique du nombre exact de Pokémon requis via les sélecteurs `data-team-select`.
+- Sélection des Pokémon disponibles les plus solides, avec priorité aux PV, niveaux et diversité de types.
+- Seuil de PV spécifique aux arènes (70 % par défaut) pour protéger l'unique combat quotidien.
+- Refus de lancer le défi si l'équipe complète n'est pas viable ou si la sélection ne correspond pas au plan.
+- Priorité automatique aux soins lorsqu'une équipe d'arène est trop blessée.
+- Clic automatique sur le bouton exact de défi une fois l'équipe validée.
+- Retour automatique au Circuit après résolution lorsqu'un lien de retour est présent.
+- Vérification quotidienne de la Ligue depuis l'orchestrateur, même si l'utilisateur ne visite pas manuellement la page.
+- Les arènes encore verrouillées sont recontrôlées plus tard sans boucle de navigation.
+- Ajout du statut Arènes et du seuil de PV dans le panel.
+
+
 ## 0.8.6 - 2026-09-26
 
 - Extraction de toute la logique de capture dans `src/features/expeditions/capture.js`.
