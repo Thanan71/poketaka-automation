@@ -48,6 +48,23 @@ function isGymPreparePage() {
   return /^\/gyms\/[^/]+\/prepare\/?$/.test(location.pathname);
 }
 
+function isGymResultLikePage() {
+  return /^\/gyms\/[^/]+\/(?!prepare\/?$)[^/]+\/?$/.test(location.pathname);
+}
+
+function gymReturnToCircuitLink() {
+  return [...document.querySelectorAll('a[href]')]
+    .filter(isVisible)
+    .find(anchor => {
+      try {
+        const url = new URL(anchor.href, location.href);
+        return url.origin === location.origin && /^\/league\/?$/.test(url.pathname);
+      } catch {
+        return false;
+      }
+    }) || null;
+}
+
 function gymPreparationForm() {
   if (!isGymPreparePage()) return null;
   return document.querySelector(
@@ -246,6 +263,26 @@ function leagueAttentionReason() {
 
 async function handleLeagueAutomation() {
   if (!config.autoGyms) return false;
+
+  if (isGymResultLikePage()) {
+    const returnLink = gymReturnToCircuitLink();
+    if (!returnLink) return false;
+
+    if (now() - (gymCycle().lastChallengeAt || 0) < 2500) {
+      return false;
+    }
+
+    state.gymCycle = {
+      ...gymCycle(),
+      phase: 'result',
+      reason: 'Combat résolu — retour au Circuit pour actualiser la progression',
+      lastCheckAt: now(),
+    };
+    saveState(state);
+    updatePanel();
+
+    return clickElement(returnLink, 'Arène: retour au Circuit');
+  }
 
   if (isLeagueIndexPage()) {
     const today = localDayKey();
