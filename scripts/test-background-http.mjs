@@ -37,6 +37,13 @@ assert(
 );
 
 assert(
+  backgroundSource.includes("state.expeditionPlan = {") &&
+  backgroundSource.includes("viability: assessment.plan.known") &&
+  backgroundSource.includes("normalizeText(state.expeditionPlan?.title || '') !=="),
+  'background expedition plan must stay synchronized with prepared and active missions'
+);
+
+assert(
   backgroundSource.includes("navigate: false") &&
   backgroundSource.includes("'pokemon_public_ids[]': plannedIds"),
   'background actions must submit direct POST payloads without navigating'
@@ -80,5 +87,6 @@ assert(
 console.log('Background GET whitelist: OK');
 console.log('Detached HTML parsing: OK');
 console.log('Expedition/league/collection background observation: OK');
+console.log('Background expedition-plan synchronization: OK');
 console.log('Fresh-route navigation suppression + fallback: OK');
 console.log('Background POST actions without page changes: OK');
