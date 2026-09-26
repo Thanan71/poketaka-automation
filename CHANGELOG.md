@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.9.4 - 2026-09-26
+
+- Correction d'un blocage où la progression Pokémon pouvait retarder le lancement de l'expédition suivante.
+- Une expédition à résoudre, relancer ou préparer passe désormais toujours avant un scan de renforcement/évolution.
+- La progression Pokémon ne devient prioritaire qu'en fallback lorsqu'une préparation d'expédition a réellement échoué faute d'équipe viable.
+- Après un renforcement réussi, le Pokémon est marqué comme traité pour le scan courant afin d'empêcher des montées de niveau répétées à chaque cycle.
+- Après une évolution réussie, le Pokémon est également marqué comme traité avant de rendre la priorité aux expéditions.
+- Correction du parseur numérique des niveaux et ressources (Poussière/Bonbons), dont la regex avait perdu ses échappements.
+- Ajout de tests CI couvrant la priorité de relance d'expédition, le parsing des nombres et la règle d'une seule amélioration par scan.
+
+
 ## 0.9.3 - 2026-09-26
 
 - Ajout du mode GET silencieux en arrière-plan.
