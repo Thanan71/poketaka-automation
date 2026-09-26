@@ -436,6 +436,33 @@ async function handleExpeditionPreparation() {
     return false;
   }
 
+  if (
+    config.directHttpActions &&
+    config.smartTeam &&
+    assessment.plan.viable
+  ) {
+    if (recentDirectRequest(1800) || recentBotAction(1800)) return false;
+
+    const plannedIds = assessment.plan.team.map(pokemon => pokemon.id);
+    if (plannedIds.length >= requirement.min) {
+      setExpeditionPhase('starting', {
+        title: canonicalTitle,
+      });
+
+      return submitObservedForm(
+        requirement.form,
+        `Lancement HTTP: ${canonicalTitle}`,
+        {
+          expectedKind: 'expedition_launch',
+          overrides: {
+            selection_source: 'custom',
+            'pokemon_public_ids[]': plannedIds,
+          },
+        }
+      );
+    }
+  }
+
   if (requirement.selected < requirement.min) {
     if (config.smartTeam) {
       const selected = await selectNextPlannedPokemon(requirement, assessment);
@@ -476,8 +503,17 @@ async function handleExpeditionPreparation() {
   });
 
   if (launchButton) {
-    if (recentBotAction(1800)) return false;
+    if (recentBotAction(1800) || recentDirectRequest(1800)) return false;
     setExpeditionPhase('starting');
+
+    if (config.directHttpActions) {
+      return submitObservedForm(
+        requirement.form,
+        'Lancement HTTP de l’expédition',
+        { expectedKind: 'expedition_launch' }
+      );
+    }
+
     return clickElement(launchButton, 'Lancement de l’expédition');
   }
 
