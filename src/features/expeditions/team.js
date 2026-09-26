@@ -1,5 +1,4 @@
-function expeditionTeamRequirement() {
-  const form = document.querySelector('form.expedition-prep[data-team-builder]');
+function teamRequirementFromForm(form) {
   if (!form) return null;
 
   const min = Number(form.getAttribute('data-team-min') || 1);
@@ -9,6 +8,11 @@ function expeditionTeamRequirement() {
     .filter(Boolean);
 
   return { form, min, max, selected: selectedIds.length, selectedIds };
+}
+
+function expeditionTeamRequirement(root = document) {
+  const form = root.querySelector('form.expedition-prep[data-team-builder]');
+  return teamRequirementFromForm(form);
 }
 
 function canonicalType(value) {
