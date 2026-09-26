@@ -14,6 +14,7 @@ const STORAGE_KEY = 'poketaka-automation:config';
     autoProgression: true,
     autoGyms: true,
     minGymHpPercent: 70,
+    gymRetryMinutes: 30,
     strategy: 'progression',
     minSuccessChance: 55,
     avoidLongLowValue: true,
