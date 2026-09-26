@@ -41,6 +41,7 @@
     captureNewSpecies: true,
     captureRare: true,
     captureUnknownEncounters: false,
+    minCaptureIvScore: 80,
     minBallReserve: 3,
     autoPlant: false,
     panelCollapsed: false,
