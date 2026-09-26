@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.9.3 - 2026-09-26
+
+- Ajout du mode GET silencieux en arrière-plan.
+- Le bot peut maintenant lire /expeditions, /league et /collection sans changer la page visible.
+- Parsing HTML hors écran via DOMParser avec session same-origin.
+- Ajout d'une whitelist stricte pour les pages GET observables.
+- Le classement des expéditions fonctionne maintenant sur un document téléchargé.
+- Les pages de préparation d'expédition sont récupérées en arrière-plan puis soumises directement en POST.
+- Les Arènes sont détectées et préparées depuis /league et /gyms/{slug}/prepare sans navigation visible.
+- La collection et les profils Pokémon sont analysés en arrière-plan pour le renforcement et les évolutions.
+- Les résultats d'expédition peuvent être récupérés en GET ; la capture automatique est ensuite soumise en POST sans ouvrir la page résultat.
+- Les informations de compte (niveau dresseur, espèces capturées, zones verrouillées, badges et dépendances) sont mises à jour depuis les documents téléchargés.
+- La navigation visible vers Ligue, Collection et Expéditions est supprimée lorsqu'une observation GET récente et valide existe.
+- Fallback automatique vers la navigation classique si un GET échoue, expire ou si une action serveur n'est pas connue.
+- Le panel affiche maintenant l'état GET silencieux, le nombre d'observations et la dernière route lue.
+- Intervalle de rafraîchissement GET configurable (30 s par défaut).
+- Ajout de tests CI dédiés au mode arrière-plan, au parsing détaché, au fallback et à l'absence de clic/navigation dans le coordinateur silencieux.
+
+
 ## 0.9.2 - 2026-09-26
 
 - Ajout d'un transport HTTP same-origin dédié aux actions PokéTaka observées dans le DOM.
