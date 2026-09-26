@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.2 - 2026-09-26
+
+- Correction de la détection des timers d'expédition.
+- Les durées statiques des routes (ex. "Durée 30 min") ne sont plus interprétées comme des comptes à rebours.
+- Détection prioritaire des timers structurés (time, data-end, countdown/timer).
+- Détection contextuelle via "temps restant", "retour dans", "se termine dans", "remaining", etc.
+- Support des heures de fin absolues du type "se termine à 14:32".
+- Ajout d'une commande Tampermonkey "Diagnostiquer le timer de la page".
+- Journalisation de la source exacte du timer détecté en mode debug.
+
+
 ## 0.3.1 - 2026-09-26
 
 - Correction des sections repliables qui se refermaient à chaque rafraîchissement du dashboard.
