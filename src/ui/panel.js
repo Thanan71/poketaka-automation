@@ -987,7 +987,10 @@ GM_addStyle(`
       liveCapture = null;
     }
 
-    if (liveCapture) {
+    if (
+      liveCapture &&
+      (liveCapture.captureButton || liveCapture.form || liveCapture.skipButton)
+    ) {
       const captureDecision = decideCapture(liveCapture);
       const meta = captureActionMeta(captureDecision.action);
       const title = captureDecision.action === 'capture'
@@ -1102,7 +1105,10 @@ GM_addStyle(`
       }
     }
 
-    if (context) {
+    if (
+      context &&
+      (context.captureButton || context.form || context.skipButton)
+    ) {
       const decision = decideCapture(context);
       return {
         active: true,
