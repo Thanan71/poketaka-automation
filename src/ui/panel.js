@@ -709,6 +709,27 @@ GM_addStyle(`
     const current = moduleFromLocation();
     const status = state.moduleStatus?.[module.id] || {};
 
+    if (module.id === 'progression' && config.autoGyms) {
+      const gym = gymCycle();
+      const badgeText = gym.badges != null
+        ? `${gym.badges}/${gym.totalBadges || 8}`
+        : null;
+
+      if (gym.availableToday === true) {
+        return {
+          className: 'ready',
+          label: badgeText ? `Arène dispo · ${badgeText}` : 'Arène disponible',
+        };
+      }
+
+      if (gym.checkedDay === localDayKey() && gym.availableToday === false) {
+        return {
+          className: '',
+          label: badgeText ? `Vérifié · ${badgeText}` : 'Vérifié aujourd’hui',
+        };
+      }
+    }
+
     if (current?.id === module.id) {
       if (status.nextDueAt) {
         const remaining = formatRemaining(status.nextDueAt);
@@ -949,6 +970,16 @@ GM_addStyle(`
         return;
       }
 
+      if (action === 'gym-hp-dec') {
+        stepCaptureSetting('minGymHpPercent', -5, 10, 100);
+        return;
+      }
+
+      if (action === 'gym-hp-inc') {
+        stepCaptureSetting('minGymHpPercent', 5, 10, 100);
+        return;
+      }
+
       if (action === 'ranking') {
         const ranking = rankExpeditions();
         if (!ranking.length) {
@@ -1025,6 +1056,32 @@ GM_addStyle(`
     const missionPlan = state.expeditionPlan || {};
     const missionScore = state.selectedExpeditionScore;
     const missionReason = missionPlan.reason || state.orchestrator?.lastReason || '';
+    const gym = gymCycle();
+    const showGymCard =
+      config.autoGyms &&
+      (
+        isLeagueIndexPage() ||
+        isGymPreparePage() ||
+        gym.availableToday === true ||
+        gym.checkedDay === localDayKey()
+      );
+    const gymPhaseLabels = {
+      unknown: 'Non vérifié',
+      available: 'Disponible',
+      opening_prepare: 'Ouverture',
+      preparing: 'Préparation',
+      challenging: 'Combat',
+      blocked: 'Bloqué',
+      done: 'Terminé',
+    };
+    const gymTone = gym.phase === 'available'
+      ? 'ready'
+      : gym.phase === 'blocked'
+        ? 'danger'
+        : ['opening_prepare', 'preparing', 'challenging'].includes(gym.phase)
+          ? 'current'
+          : '';
+    const gymTitle = gym.arena || 'Circuit des Arènes';
     const nextText = next
       ? `${next.module.label} · ${formatRemaining(next.dueAt)}`
       : 'Aucune';
@@ -1037,6 +1094,7 @@ GM_addStyle(`
       'autoIncubatorClaim',
       'autoBreedingClaim',
       'autoProgression',
+      'autoGyms',
       'autoPlant',
     ];
     const intelligenceKeys = ['smartTeam'];
@@ -1200,6 +1258,38 @@ GM_addStyle(`
           ` : ''}
         </section>
 
+        ${showGymCard ? `
+          <section class="pta-mission" aria-label="Automatisation des arènes">
+            <div class="pta-mission-head">
+              <div class="pta-mission-name" title="${escapeHtml(gymTitle)}">
+                ${escapeHtml(gymTitle)}
+              </div>
+              <span class="pta-badge ${gymTone}">
+                ${escapeHtml(gymPhaseLabels[gym.phase] || gym.phase || 'Arènes')}
+              </span>
+            </div>
+
+            <div class="pta-chip-row">
+              ${gym.badges != null ? chipHtml(`Badges · ${gym.badges}/${gym.totalBadges || 8}`) : ''}
+              ${gym.badge ? chipHtml(gym.badge) : ''}
+              ${gym.champion ? chipHtml(`Champion · ${gym.champion}`) : ''}
+              ${gym.requiredTeamSize ? chipHtml(`Équipe · ${gym.requiredTeamSize}`) : ''}
+            </div>
+
+            ${Array.isArray(gym.selectedTeam) && gym.selectedTeam.length ? `
+              <div class="pta-chip-row">
+                ${gym.selectedTeam.map(name => chipHtml(name)).join('')}
+              </div>
+            ` : ''}
+
+            ${gym.reason ? `
+              <div class="pta-status-copy" title="${escapeHtml(gym.reason)}">
+                ${escapeHtml(gym.reason)}
+              </div>
+            ` : ''}
+          </section>
+        ` : ''}
+
         ${captureView.active ? `
           <section class="pta-capture-card" data-tone="${captureTone || 'neutral'}" aria-label="Décision de capture">
             <div class="pta-capture-head">
@@ -1318,7 +1408,20 @@ GM_addStyle(`
             ${optionButton('autoIncubatorClaim', 'Incubateur')}
             ${optionButton('autoBreedingClaim', 'Pension')}
             ${optionButton('autoProgression', 'Progression')}
+            ${optionButton('autoGyms', 'Arènes auto')}
             ${optionButton('autoPlant', 'Replanter')}
+
+            <div class="pta-stepper">
+              <div class="pta-stepper-label">
+                PV minimum Arènes
+                <small>Le défi quotidien n’est lancé qu’avec une équipe suffisamment saine</small>
+              </div>
+              <div class="pta-stepper-value">${config.minGymHpPercent}%</div>
+              <div class="pta-stepper-controls">
+                <button class="pta-stepper-btn" data-action="gym-hp-dec" title="Réduire le seuil de PV">−</button>
+                <button class="pta-stepper-btn" data-action="gym-hp-inc" title="Augmenter le seuil de PV">+</button>
+              </div>
+            </div>
           </div>
         </details>
 
