@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.1 - 2026-09-26
+
+- Correction de la détection des expéditions lançables.
+- Détection native des cartes `.mission-card` dans le panneau `available`.
+- Utilisation directe des liens `/expeditions/.../prepare`.
+- Normalisation des apostrophes typographiques pour les libellés comme "Préparer l’expédition".
+- Lecture des détails de mission depuis le dialog lié afin de récupérer chance, durée et niveau conseillé.
+- Support explicite de "Niveau conseillé" dans le scoring.
+
+
 ## 0.4.0 - 2026-09-26
 
 - Ajout d'une machine d'état persistante pour le cycle complet des expéditions.
