@@ -356,6 +356,7 @@ async function submitObservedForm(
     expectedKind = null,
     navigate = true,
     moduleId = null,
+    cooldownMs = 5000,
   } = {}
 ) {
   if (!config.directHttpActions) return false;
@@ -397,6 +398,16 @@ async function submitObservedForm(
     !idempotency
   ) {
     log('HTTP direct refusé: clé idempotency absente', kind);
+    return false;
+  }
+
+  const guardKey = `http:${kind}:${url.pathname}:${idempotency || 'no-idempotency'}`;
+  if (!acquireActionGuard(guardKey, cooldownMs)) {
+    log('HTTP direct temporisé: action identique récente', {
+      kind,
+      endpoint: url.pathname,
+      remainingMs: actionGuardRemaining(guardKey, cooldownMs),
+    });
     return false;
   }
 

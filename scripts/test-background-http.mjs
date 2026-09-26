@@ -9,6 +9,7 @@ const pokemonSource = fs.readFileSync('src/features/pokemon/progression.js', 'ut
 const panelSource = fs.readFileSync('src/ui/panel.js', 'utf8');
 const stateSource = fs.readFileSync('src/core/state.js', 'utf8');
 const domSource = fs.readFileSync('src/core/dom.js', 'utf8');
+const resultSource = fs.readFileSync('src/features/expeditions/result.js', 'utf8');
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -108,11 +109,11 @@ assert(
 );
 
 assert(
-  backgroundSource.includes('function expeditionRewardClaimForm') &&
-  backgroundSource.includes('function expeditionRewardsRecovered') &&
+  resultSource.includes('function expeditionRewardClaimForm') &&
+  resultSource.includes('function expeditionRewardsRecovered') &&
   backgroundSource.includes("expectedKind: 'expedition_claim'") &&
   backgroundSource.includes('async function verifyBackgroundExpeditionClaim'),
-  'background result handling must claim and verify expedition rewards before relaunch'
+  'shared result parser + background handling must claim and verify expedition rewards before relaunch'
 );
 
 assert(
