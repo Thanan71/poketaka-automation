@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.5 - 2026-09-26
+
+- Le loader vérifie désormais `dist/version.json` à chaque chargement de PokéTaka.
+- Le runtime le plus récent est chargé indépendamment du délai de mise à jour propre à Tampermonkey.
+- Ajout d'un cache-buster sur `version.json` et `runtime.js` pour éviter les anciennes réponses GitHub Raw.
+- Le panel peut afficher une différence entre la version du runtime et celle du loader Tampermonkey.
+- Le cache local reste utilisé si GitHub Raw est temporairement indisponible.
+
+
 ## 0.8.3 - 2026-09-26
 
 - Correction de la capture automatique sur la vraie page de résultat PokéTaka.
