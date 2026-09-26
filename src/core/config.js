@@ -16,6 +16,7 @@ const STORAGE_KEY = 'poketaka-automation:config';
     minGymHpPercent: 70,
     gymRetryMinutes: 30,
     strategy: 'progression',
+    goalPriorityBonus: 1800,
     minSuccessChance: 55,
     avoidLongLowValue: true,
     smartTeam: true,
