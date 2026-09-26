@@ -219,8 +219,11 @@ function detachedLeagueInfo(root) {
   };
 }
 
-async function backgroundObserveExpeditions() {
-  const page = await fetchObservedPage('/expeditions', { cacheMs: 5000 });
+async function backgroundObserveExpeditions({ force = false } = {}) {
+  const page = await fetchObservedPage('/expeditions', {
+    cacheMs: force ? 0 : 5000,
+    force,
+  });
   if (!page) return { acted: false, page: null, active: null };
 
   const root = page.doc;
@@ -506,6 +509,64 @@ async function backgroundHandleExpeditionResult(active) {
   return false;
 }
 
+async function verifyBackgroundExpeditionLaunch(expectedTitle) {
+  const delays = [250, 700];
+
+  for (const delay of delays) {
+    if (delay) await sleep(delay);
+
+    const page = await fetchObservedPage('/expeditions', {
+      cacheMs: 0,
+      force: true,
+    });
+    if (!page) continue;
+
+    const active = detachedActiveExpeditionSnapshot(page.doc);
+    if (!active) continue;
+
+    mergeBackgroundExpeditionAccount(page.doc);
+
+    const dueAt = active.dueAt || null;
+    const phase = dueAt && dueAt <= now() + 1500 ? 'due' : 'running';
+
+    state.selectedExpedition = active.title;
+    state.selectedExpeditionScore = null;
+    state.expeditionPlan = {
+      ...state.expeditionPlan,
+      title: active.title,
+      viability: 'active',
+      reason: 'Lancement confirmé par GET /expeditions',
+      updatedAt: now(),
+    };
+
+    setExpeditionPhase(phase, {
+      title: active.title,
+      resultUrl: active.resultUrl,
+      dueAt,
+    });
+
+    appendActionLog(
+      'success',
+      'expedition',
+      `Lancement confirmé: ${active.title}`,
+      {
+        expected: expectedTitle,
+        phase,
+      }
+    );
+    saveState(state);
+    return active;
+  }
+
+  appendActionLog(
+    'warning',
+    'expedition',
+    `Lancement non confirmé: ${expectedTitle}`,
+    'Aucune expédition active observée après le POST'
+  );
+  return null;
+}
+
 async function backgroundStartExpedition(expeditionPage) {
   if (!config.autoStartExpeditions || !expeditionPage?.doc) return false;
 
@@ -564,6 +625,16 @@ async function backgroundStartExpedition(expeditionPage) {
 
   setExpeditionPhase('starting', { title: selected.title });
 
+  appendActionLog(
+    'info',
+    'expedition',
+    `Tentative de lancement silencieux: ${selected.title}`,
+    {
+      team: assessment.plan.team.map(pokemon => pokemon.name),
+      attempt: 1,
+    }
+  );
+
   const submitted = await submitObservedForm(
     requirement.form,
     `Lancement arrière-plan: ${selected.title}`,
@@ -578,15 +649,80 @@ async function backgroundStartExpedition(expeditionPage) {
     }
   );
 
-  if (!submitted) {
-    setExpeditionPhase('ready_to_start', {
-      title: null,
-      resultUrl: null,
-      dueAt: null,
-    });
+  if (submitted) {
+    const active = await verifyBackgroundExpeditionLaunch(selected.title);
+    if (active) return true;
   }
 
-  return submitted;
+  appendActionLog(
+    'warning',
+    'expedition',
+    `Nouvelle tentative silencieuse: ${selected.title}`,
+    'Le premier POST n’a pas produit d’expédition active vérifiable'
+  );
+
+  const retryPrepare = await fetchObservedPage(prepareUrl, {
+    cacheMs: 0,
+    force: true,
+  });
+
+  if (retryPrepare) {
+    const retryRequirement = expeditionTeamRequirement(retryPrepare.doc);
+
+    if (retryRequirement) {
+      const retryAssessment = preparationTeamPlan(retryRequirement);
+      const retryIds = retryAssessment.plan.team.map(pokemon => pokemon.id);
+
+      if (
+        retryAssessment.plan.viable &&
+        retryIds.length >= retryRequirement.min
+      ) {
+        appendActionLog(
+          'info',
+          'expedition',
+          `Tentative de lancement silencieux: ${selected.title}`,
+          {
+            team: retryAssessment.plan.team.map(pokemon => pokemon.name),
+            attempt: 2,
+          }
+        );
+
+        const retried = await submitObservedForm(
+          retryRequirement.form,
+          `Relance arrière-plan: ${selected.title}`,
+          {
+            expectedKind: 'expedition_launch',
+            navigate: false,
+            moduleId: 'expeditions',
+            overrides: {
+              selection_source: 'custom',
+              'pokemon_public_ids[]': retryIds,
+            },
+          }
+        );
+
+        if (retried) {
+          const active = await verifyBackgroundExpeditionLaunch(selected.title);
+          if (active) return true;
+        }
+      }
+    }
+  }
+
+  appendActionLog(
+    'error',
+    'expedition',
+    `Échec du lancement silencieux: ${selected.title}`,
+    httpTransportState().lastError || 'Aucune expédition active après deux tentatives'
+  );
+
+  setExpeditionPhase('ready_to_start', {
+    title: null,
+    resultUrl: null,
+    dueAt: null,
+  });
+
+  return false;
 }
 
 async function backgroundHandleLeague() {
@@ -933,7 +1069,7 @@ async function runBackgroundAutomation() {
 
   backgroundMarkSweep();
 
-  const expeditionObservation = await backgroundObserveExpeditions();
+  let expeditionObservation = await backgroundObserveExpeditions();
 
   if (
     expeditionObservation.active &&
@@ -943,6 +1079,12 @@ async function runBackgroundAutomation() {
       expeditionObservation.active
     );
     if (resultAction) return true;
+
+    if (expeditionCycle().phase === 'ready_to_start') {
+      expeditionObservation = await backgroundObserveExpeditions({
+        force: true,
+      });
+    }
   }
 
   const leaguePage = await fetchObservedPage('/league', { cacheMs: 6000 });
