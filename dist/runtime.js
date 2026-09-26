@@ -2,7 +2,7 @@
 (() => {
   'use strict';
 
-  const VERSION = "0.9.2";
+  const VERSION = "0.9.3";
 
 // ---- src/core/config.js ----
 const STORAGE_KEY = 'poketaka-automation:config';
@@ -11,6 +11,8 @@ const STORAGE_KEY = 'poketaka-automation:config';
   const DEFAULT_CONFIG = {
     enabled: false,
     directHttpActions: true,
+    backgroundHttpMode: true,
+    backgroundRefreshSeconds: 30,
     intervalMs: 15000,
     jitterMs: 3500,
     autoClaimExpeditions: true,
@@ -124,6 +126,16 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
         lastKind: null,
         lastStatus: null,
         lastError: null,
+      },
+      backgroundHttp: {
+        gets: 0,
+        cacheHits: 0,
+        lastAt: 0,
+        lastUrl: null,
+        lastStatus: null,
+        lastError: null,
+        lastSweepAt: 0,
+        observedPaths: {},
       },
       navIndex: 0,
       actions: 0,
@@ -412,6 +424,189 @@ function elementText(el) {
 // ---- src/core/http.js ----
 let directRequestInFlight = false;
 
+const backgroundPageCache = new Map();
+let backgroundRequestInFlight = false;
+
+function backgroundHttpState() {
+  if (!state.backgroundHttp || typeof state.backgroundHttp !== 'object') {
+    state.backgroundHttp = {
+      gets: 0,
+      cacheHits: 0,
+      lastAt: 0,
+      lastUrl: null,
+      lastStatus: null,
+      lastError: null,
+      lastSweepAt: 0,
+      observedPaths: {},
+    };
+  }
+  return state.backgroundHttp;
+}
+
+function backgroundRouteFresh(pathname, maxAgeMs = 90000) {
+  const observedAt = Number(backgroundHttpState().observedPaths?.[pathname] || 0);
+  return observedAt > 0 && now() - observedAt <= maxAgeMs;
+}
+
+function backgroundPageKind(urlLike) {
+  let url;
+  try {
+    url = new URL(urlLike, location.href);
+  } catch {
+    return null;
+  }
+
+  if (url.origin !== location.origin) return null;
+
+  const path = url.pathname;
+  const routes = [
+    ['expeditions', /^\/expeditions\/?$/],
+    ['expedition_prepare', /^\/expeditions\/[^/]+\/prepare\/?$/],
+    ['expedition_result', /^\/expeditions\/results\/[^/]+\/?$/],
+    ['league', /^\/league\/?$/],
+    ['gym_prepare', /^\/gyms\/[^/]+\/prepare\/?$/],
+    ['collection', /^\/collection\/?$/],
+    ['pokemon_profile', /^\/collection\/[^/]+\/?$/],
+  ];
+
+  return routes.find(([, pattern]) => pattern.test(path))?.[0] || null;
+}
+
+function recordBackgroundHttp(patch = {}) {
+  state.backgroundHttp = {
+    ...backgroundHttpState(),
+    ...patch,
+  };
+  saveState(state);
+  updatePanel();
+}
+
+function attachBackgroundBase(doc, href) {
+  if (!doc?.head) return doc;
+  const existing = doc.querySelector('base[data-poketaka-background-base]');
+  if (existing) existing.remove();
+
+  const base = doc.createElement('base');
+  base.setAttribute('data-poketaka-background-base', '');
+  base.href = href;
+  doc.head.prepend(base);
+  return doc;
+}
+
+async function fetchObservedPage(
+  urlLike,
+  {
+    cacheMs = 8000,
+    force = false,
+  } = {}
+) {
+  if (!config.backgroundHttpMode) return null;
+
+  let url;
+  try {
+    url = new URL(urlLike, location.href);
+  } catch {
+    return null;
+  }
+
+  const kind = backgroundPageKind(url.href);
+  if (!kind) {
+    log('GET background refusé: route non autorisée', url.href);
+    return null;
+  }
+
+  const cacheKey = url.href;
+  const cached = backgroundPageCache.get(cacheKey);
+  if (!force && cached && now() - cached.fetchedAt <= cacheMs) {
+    recordBackgroundHttp({
+      cacheHits: Number(backgroundHttpState().cacheHits || 0) + 1,
+      lastAt: now(),
+      lastUrl: url.pathname,
+      lastStatus: 'cache',
+      lastError: null,
+    });
+    return cached;
+  }
+
+  if (backgroundRequestInFlight) return null;
+  backgroundRequestInFlight = true;
+
+  try {
+    const response = await fetch(url.href, {
+      method: 'GET',
+      headers: {
+        Accept: 'text/html,application/xhtml+xml',
+      },
+      credentials: 'same-origin',
+      redirect: 'follow',
+      cache: 'no-store',
+    });
+
+    const finalUrl = new URL(response.url || url.href, url.href);
+
+    if (finalUrl.origin !== location.origin) {
+      throw new Error('Redirection GET cross-origin refusée');
+    }
+
+    if (/^\/login\/?$/.test(finalUrl.pathname)) {
+      throw new Error('Session PokéTaka expirée');
+    }
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const contentType = response.headers.get('content-type') || '';
+    if (!contentType.includes('text/html')) {
+      throw new Error(`Réponse non HTML (${contentType || 'inconnue'})`);
+    }
+
+    const html = await response.text();
+    const doc = attachBackgroundBase(
+      new DOMParser().parseFromString(html, 'text/html'),
+      finalUrl.href
+    );
+
+    const result = {
+      kind,
+      url: finalUrl.href,
+      pathname: finalUrl.pathname,
+      status: response.status,
+      fetchedAt: now(),
+      html,
+      doc,
+    };
+
+    backgroundPageCache.set(cacheKey, result);
+
+    recordBackgroundHttp({
+      gets: Number(backgroundHttpState().gets || 0) + 1,
+      lastAt: now(),
+      lastUrl: finalUrl.pathname,
+      lastStatus: response.status,
+      lastError: null,
+      observedPaths: {
+        ...(backgroundHttpState().observedPaths || {}),
+        [finalUrl.pathname]: now(),
+      },
+    });
+
+    return result;
+  } catch (error) {
+    const message = error?.message || String(error);
+    recordBackgroundHttp({
+      lastAt: now(),
+      lastUrl: url.pathname,
+      lastStatus: 'error',
+      lastError: message,
+    });
+    log('GET background en échec', url.pathname, message);
+    return null;
+  } finally {
+    backgroundRequestInFlight = false;
+  }
+}
+
 function httpTransportState() {
   if (!state.httpTransport || typeof state.httpTransport !== 'object') {
     state.httpTransport = {
@@ -570,6 +765,7 @@ async function submitObservedForm(
     overrides = {},
     expectedKind = null,
     navigate = true,
+    moduleId = null,
   } = {}
 ) {
   if (!config.directHttpActions) return false;
@@ -616,6 +812,7 @@ async function submitObservedForm(
 
   directRequestInFlight = true;
   recordDirectAction(actionName, kind, url.pathname);
+  if (moduleId) markModuleAction(moduleId);
 
   try {
     const response = await fetch(url.href, {
@@ -712,8 +909,7 @@ function navigateDirectly(urlLike, actionName) {
 }
 
 // ---- src/features/expeditions/team.js ----
-function expeditionTeamRequirement() {
-  const form = document.querySelector('form.expedition-prep[data-team-builder]');
+function teamRequirementFromForm(form) {
   if (!form) return null;
 
   const min = Number(form.getAttribute('data-team-min') || 1);
@@ -723,6 +919,11 @@ function expeditionTeamRequirement() {
     .filter(Boolean);
 
   return { form, min, max, selected: selectedIds.length, selectedIds };
+}
+
+function expeditionTeamRequirement(root = document) {
+  const form = root.querySelector('form.expedition-prep[data-team-builder]');
+  return teamRequirementFromForm(form);
 }
 
 function canonicalType(value) {
@@ -2777,15 +2978,17 @@ function pokemonProfileId() {
   return location.pathname.split('/').filter(Boolean)[1] || null;
 }
 
-function collectionPokemonRecords() {
-  if (!isCollectionIndexPage()) return [];
+function collectionPokemonRecords(root = document, baseUrl = location.href) {
+  if (root === document && !isCollectionIndexPage()) return [];
 
-  return [...document.querySelectorAll('a.pokemon-record[href*="/collection/"]')]
-    .filter(isVisible)
+  return [...root.querySelectorAll('a.pokemon-record[href*="/collection/"]')]
+    .filter(card => root !== document || isVisible(card))
     .map(card => {
       let id = null;
+      let href = null;
       try {
-        const url = new URL(card.href, location.href);
+        const url = new URL(card.getAttribute('href') || card.href, baseUrl);
+        href = url.href;
         id = url.pathname.split('/').filter(Boolean)[1] || null;
       } catch {}
 
@@ -2797,26 +3000,33 @@ function collectionPokemonRecords() {
           .map(img => canonicalType(img.alt))
           .filter(Boolean),
         favorite: Boolean(card.querySelector('[aria-label="Favori"]')),
-        href: card.href,
+        href,
         card,
       };
     })
-    .filter(record => record.id);
+    .filter(record => record.id && record.href);
 }
 
-function pokemonProfileContext() {
-  if (!isPokemonProfilePage()) return null;
+function pokemonProfileContext(rootDoc = document, profileUrl = location.href) {
+  if (rootDoc === document && !isPokemonProfilePage()) return null;
 
-  const root = document.querySelector('#pokemon-profile-section');
-  const resourceStrip = document.querySelector('.pokemon-resource-strip');
-  const name = root?.querySelector('#pokemon-profile-title')?.textContent?.trim() || 'Pokémon';
-  const level = pokemonNumber(root?.querySelector('.pokemon-profile__level-badge strong')?.textContent);
-  const hpProgress = root?.querySelector('progress.pokemon-health');
+  const root = rootDoc.querySelector('#pokemon-profile-section');
+  if (!root) return null;
+
+  const resourceStrip = rootDoc.querySelector('.pokemon-resource-strip');
+  const name = root.querySelector('#pokemon-profile-title')?.textContent?.trim() || 'Pokémon';
+  const level = pokemonNumber(root.querySelector('.pokemon-profile__level-badge strong')?.textContent);
+  const hpProgress = root.querySelector('progress.pokemon-health');
   const badges = normalizeText(
-    [...(root?.querySelectorAll('.pokemon-profile__badges .status-badge') || [])]
+    [...(root.querySelectorAll('.pokemon-profile__badges .status-badge') || [])]
       .map(node => node.textContent || '')
       .join(' ')
   );
+
+  let id = null;
+  try {
+    id = new URL(profileUrl, location.href).pathname.split('/').filter(Boolean)[1] || null;
+  } catch {}
 
   let stardust = null;
   let candies = null;
@@ -2834,20 +3044,23 @@ function pokemonProfileContext() {
     }
   });
 
+  const activityHelp = rootDoc.querySelector(
+    '#pokemon-level-dialog .form-help, #pokemon-evolution-dialog .form-help'
+  );
+
   return {
-    id: pokemonProfileId(),
+    id,
     name,
     level,
     hpPercent: hpProgress ? Number(hpProgress.value || 0) : null,
     inActivity:
       badges.includes('en expedition') ||
-      Boolean(document.querySelector(
-        '#pokemon-level-dialog .form-help, #pokemon-evolution-dialog .form-help'
-      ) && /participe actuellement a une activite/.test(normalizeText(
-        document.querySelector(
-          '#pokemon-level-dialog .form-help, #pokemon-evolution-dialog .form-help'
-        )?.textContent || ''
-      ))),
+      Boolean(
+        activityHelp &&
+        /participe actuellement a une activite/.test(
+          normalizeText(activityHelp.textContent || '')
+        )
+      ),
     stardust,
     candies,
     candyName,
@@ -2864,8 +3077,8 @@ function gameplayRequirementInfo(node) {
   };
 }
 
-function pokemonLevelUpOption() {
-  const dialog = document.querySelector('#pokemon-level-dialog');
+function pokemonLevelUpOption(root = document) {
+  const dialog = root.querySelector('#pokemon-level-dialog');
   const form = dialog?.querySelector('form[action*="/level-up"]');
   if (!dialog || !form) {
     return {
@@ -2916,8 +3129,8 @@ function pokemonLevelUpOption() {
   };
 }
 
-function pokemonEvolutionOptions() {
-  const dialog = document.querySelector('#pokemon-evolution-dialog');
+function pokemonEvolutionOptions(root = document) {
+  const dialog = root.querySelector('#pokemon-evolution-dialog');
   if (!dialog) return [];
 
   return [...dialog.querySelectorAll('form[action*="/evolve"]')].map(form => {
@@ -4098,22 +4311,23 @@ function expeditionPrepareLink(card) {
     });
   }
 
-  function expeditionCards() {
+  function expeditionCards(root = document) {
+    const requireVisibility = root === document;
     // Sélecteur natif PokéTaka : les missions lançables se trouvent dans le
     // catalogue "available" et possèdent un lien /prepare.
-    const exact = [...document.querySelectorAll(
+    const exact = [...root.querySelectorAll(
       '.mission-catalog[data-panel="available"] .mission-card, .mission-catalog__grid > .mission-card'
     )]
-      .filter(isVisible)
+      .filter(card => !requireVisibility || isVisible(card))
       .filter(card => Boolean(expeditionPrepareLink(card)));
 
     if (exact.length) return exact;
 
     // Fallback pour rester compatible si le HTML du site évolue.
-    const candidates = [...document.querySelectorAll(
+    const candidates = [...root.querySelectorAll(
       'article, section, li, .card, [class*="card"], [class*="expedition"], [data-expedition], [data-route]'
     )]
-      .filter(isVisible)
+      .filter(el => !requireVisibility || isVisible(el))
       .filter(el => Boolean(expeditionPrepareLink(el)));
 
     const seen = new Set();
@@ -4253,10 +4467,10 @@ function expeditionPrepareLink(card) {
     return /termine|complete|completed|deja termine|already cleared|maitrise|mastered/i.test(text);
   }
 
-  function analyzeExpedition(card, index, pageContext) {
+  function analyzeExpedition(card, index, pageContext, root = document) {
   const detailsTrigger = card.querySelector('[data-open-dialog]');
   const detailsId = detailsTrigger?.getAttribute('data-open-dialog');
-  const details = detailsId ? document.getElementById(detailsId) : null;
+  const details = detailsId ? root.getElementById(detailsId) : null;
 
   const text = normalizeText([
     card.innerText || card.textContent || '',
@@ -4408,11 +4622,11 @@ function expeditionPrepareLink(card) {
   };
 }
 
-function rankExpeditions() {
-  const cards = expeditionCards();
-  const pageText = normalizeText(document.body?.innerText || '');
+function rankExpeditions(root = document) {
+  const cards = expeditionCards(root);
+  const pageText = normalizeText(root.body?.innerText || root.body?.textContent || '');
   const historyTitles = new Set(
-    [...document.querySelectorAll('.mission-archives a strong')]
+    [...root.querySelectorAll('.mission-archives a strong')]
       .map(element => normalizeText(element.textContent || ''))
       .filter(Boolean)
   );
@@ -4423,7 +4637,7 @@ function rankExpeditions() {
   };
 
   const ranking = cards
-    .map((card, index) => analyzeExpedition(card, index, pageContext))
+    .map((card, index) => analyzeExpedition(card, index, pageContext, root))
     .filter(item => item.button)
     .sort((a, b) => b.score - a.score);
 
@@ -4478,17 +4692,8 @@ function expeditionProgressionCandidates(ranking) {
     });
 }
 
-async function startExpedition() {
-  if (!config.autoStartExpeditions) return false;
-
-  const ranking = rankExpeditions();
-  if (!ranking.length) {
-    state.selectedExpedition = null;
-    state.selectedExpeditionScore = null;
-    saveState(state);
-    updatePanel();
-    return false;
-  }
+function selectExpeditionFromRanking(ranking) {
+  if (!ranking?.length) return null;
 
   let selected = ranking.find(item => !item.blocked) || ranking[0];
   const goal = currentGoalPlan();
@@ -4502,10 +4707,7 @@ async function startExpedition() {
       item.failureStreak < 2 &&
       item.teamPlan.viable !== false
     );
-
-    if (exact) {
-      selected = exact;
-    }
+    if (exact) selected = exact;
   } else if (goal.step?.action === 'farm_captures') {
     const captureCandidates = ranking
       .filter(item => !item.blocked)
@@ -4518,12 +4720,30 @@ async function startExpedition() {
         const durationB = b.durationMinutes ?? Infinity;
         return durationA - durationB;
       });
-
     if (captureCandidates.length) selected = captureCandidates[0];
   } else if (config.strategy === 'progression') {
     const candidates = expeditionProgressionCandidates(ranking);
     if (candidates.length) selected = candidates[0];
   }
+
+  return selected;
+}
+
+async function startExpedition() {
+  if (!config.autoStartExpeditions) return false;
+
+  const ranking = rankExpeditions();
+  if (!ranking.length) {
+    state.selectedExpedition = null;
+    state.selectedExpeditionScore = null;
+    saveState(state);
+    updatePanel();
+    return false;
+  }
+
+  const selected = selectExpeditionFromRanking(ranking);
+  const goal = currentGoalPlan();
+  const targetExpedition = goalTargetExpedition();
 
   state.selectedExpedition = selected.title;
   state.selectedExpeditionScore = selected.score;
@@ -4570,6 +4790,942 @@ async function autoProgression() {
 
     return button ? clickElement(button, 'Progression') : false;
   }
+
+// ---- src/core/background.js ----
+function backgroundSweepDue() {
+  if (!config.backgroundHttpMode) return false;
+
+  const last = Number(backgroundHttpState().lastSweepAt || 0);
+  const interval = Math.max(10, Number(config.backgroundRefreshSeconds || 30)) * 1000;
+
+  if (expeditionCycle().phase === 'due') return true;
+  if (leagueNeedsDailyCheck()) return true;
+  if (pokemonProgressionScanDue()) return true;
+
+  return now() - last >= interval;
+}
+
+function backgroundMarkSweep() {
+  recordBackgroundHttp({
+    lastSweepAt: now(),
+  });
+}
+
+function detachedActiveExpeditionSnapshot(root) {
+  const card = root.querySelector('.mission-slot-card--occupied');
+  if (!card) return null;
+
+  const title = normalizeText(card.querySelector('h3')?.textContent || '') || 'expedition active';
+  const timer = card.querySelector('time[data-countdown][data-countdown-format="expedition"]');
+  const progress = card.querySelector('progress[data-mission-progress][data-progress-end]');
+  const follow = card.querySelector('a[href*="/expeditions/results/"]');
+
+  let dueAt = null;
+  const timerEnd = timer?.getAttribute('datetime');
+  if (timerEnd) {
+    const parsed = Date.parse(timerEnd);
+    if (!Number.isNaN(parsed)) dueAt = parsed;
+  }
+
+  if (!dueAt) {
+    const progressEnd = progress?.getAttribute('data-progress-end');
+    if (progressEnd) {
+      const parsed = Date.parse(progressEnd);
+      if (!Number.isNaN(parsed)) dueAt = parsed;
+    }
+  }
+
+  return {
+    title,
+    dueAt,
+    resultUrl: follow?.href || follow?.getAttribute('href') || null,
+    status: normalizeText(card.querySelector('.status-badge')?.textContent || ''),
+  };
+}
+
+function mergeBackgroundExpeditionAccount(root) {
+  const previous = accountSnapshot();
+  const progressRoot = root.querySelector('.mission-hub__progress');
+  let trainerLevel = previous.trainer?.level ?? null;
+  let capturedSpecies = previous.pokedex?.capturedSpecies ?? null;
+
+  progressRoot?.querySelectorAll(':scope > div').forEach(row => {
+    const label = normalizeText(row.querySelector('span')?.textContent || '');
+    const value = parseNumber(row.querySelector('strong')?.textContent);
+
+    if (value == null) return;
+    if (label === 'niveau' || label.includes('niveau dresseur')) trainerLevel = value;
+    if (label.includes('especes capturees')) capturedSpecies = value;
+  });
+
+  const completed = new Set(previous.expeditions?.completedTitles || []);
+  root.querySelectorAll('.mission-archives a strong').forEach(node => {
+    const title = normalizeText(node.textContent || '');
+    if (title) completed.add(title);
+  });
+
+  const availableTitles = [
+    ...root.querySelectorAll(
+      '.mission-tabset__panel[data-panel="available"] article h3, [data-panel="available"] article h3'
+    ),
+  ].map(node => node.textContent?.trim()).filter(Boolean);
+
+  const locked = [];
+  let previousTitle = availableTitles[availableTitles.length - 1] || null;
+  root.querySelectorAll('.mission-locked__grid article').forEach(card => {
+    const title = card.querySelector('h3')?.textContent?.trim() || 'Destination verrouillée';
+    const requirements = [...card.querySelectorAll('li')]
+      .map(node => parseExpeditionLockRequirement(node.textContent || '', previousTitle))
+      .filter(requirement => requirement.label);
+
+    locked.push({
+      title,
+      normalizedTitle: normalizeText(title),
+      difficulty: card.querySelector('.mission-difficulty')?.textContent?.trim() || null,
+      requirements,
+    });
+
+    previousTitle = title;
+  });
+
+  state.accountSnapshot = {
+    ...previous,
+    observedAt: now(),
+    trainer: {
+      ...previous.trainer,
+      level: trainerLevel,
+    },
+    pokedex: {
+      ...previous.pokedex,
+      known: capturedSpecies != null || previous.pokedex?.known || false,
+      capturedSpecies,
+    },
+    expeditions: {
+      ...previous.expeditions,
+      completedTitles: [...completed],
+      locked: locked.length ? locked : previous.expeditions?.locked || [],
+    },
+    sources: [...new Set([...(previous.sources || []), '/expeditions'])].slice(-20),
+  };
+  saveState(state);
+}
+
+function mergeBackgroundLeagueAccount(root, leagueInfo) {
+  const previous = accountSnapshot();
+  const lockedGyms = [...root.querySelectorAll('.gym-card--locked')].map((card, index) => {
+    const identity = card.querySelector('.gym-card__identity');
+    const requirements = [...card.querySelectorAll('.gym-requirements p')]
+      .map(node => parseLeagueRequirement(node.textContent || ''))
+      .filter(requirement => requirement.label);
+
+    return {
+      rank:
+        parseNumber(card.querySelector('.gym-rank')?.textContent?.match(/\d+/)?.[0]) ||
+        index + 1,
+      arena:
+        identity?.querySelector('h3')?.textContent?.trim() ||
+        card.querySelector('h3')?.textContent?.trim() ||
+        `Arène ${index + 1}`,
+      champion:
+        [...(identity?.querySelectorAll('p') || [])]
+          .map(node => node.textContent?.trim() || '')
+          .find(text => /^champion\s*:/i.test(text))
+          ?.replace(/^champion\s*:\s*/i, '') ||
+        null,
+      badge:
+        identity?.querySelector('.card-label')?.textContent?.trim() ||
+        card.querySelector('.card-label')?.textContent?.trim() ||
+        null,
+      requirements,
+    };
+  });
+
+  state.accountSnapshot = {
+    ...previous,
+    observedAt: now(),
+    league: {
+      ...previous.league,
+      known: true,
+      badges: leagueInfo.badges ?? previous.league?.badges ?? null,
+      totalBadges: leagueInfo.totalBadges || previous.league?.totalBadges || 8,
+      dailyBattleAvailable: leagueInfo.dailyAvailable,
+      arena: leagueInfo.gym?.arena || null,
+      champion: leagueInfo.gym?.champion || null,
+      badge: leagueInfo.gym?.badge || null,
+      phase: gymCycle().phase,
+      needsHealing: gymCycle().needsHealing,
+      lockedGyms: lockedGyms.length ? lockedGyms : previous.league?.lockedGyms || [],
+    },
+    sources: [...new Set([...(previous.sources || []), '/league'])].slice(-20),
+  };
+  saveState(state);
+}
+
+function detachedLeagueInfo(root) {
+  const headerText = normalizeText(
+    root.querySelector('.page-header__actions')?.textContent || ''
+  );
+
+  let dailyAvailable = null;
+  if (/combat du jour disponible|daily battle available/.test(headerText)) {
+    dailyAvailable = true;
+  } else if (
+    /combat du jour (?:deja )?(?:utilise|termine|indisponible)|daily battle (?:used|completed|unavailable)/.test(headerText)
+  ) {
+    dailyAvailable = false;
+  }
+
+  const progress = root.querySelector('.gym-progress');
+  const progressText = normalizeText(
+    progress?.getAttribute('aria-label') ||
+    progress?.querySelector('strong')?.textContent ||
+    progress?.textContent ||
+    ''
+  );
+  const progressMatch = progressText.match(/(\d+)\s*\/\s*(\d+)/);
+
+  const card = root.querySelector(
+    '.gym-circuit--available .gym-card--available, .gym-card.gym-card--available'
+  );
+  const prepare = card?.querySelector(
+    'a.primary-button[href*="/gyms/"][href$="/prepare"], a[href*="/gyms/"][href$="/prepare"]'
+  );
+  const facts = normalizeText(card?.textContent || '');
+  const teamSizeMatch = facts.match(/equipe de\s*(\d+)\s*pokemon/i);
+
+  return {
+    dailyAvailable,
+    badges: progressMatch ? Number(progressMatch[1]) : null,
+    totalBadges: progressMatch ? Number(progressMatch[2]) : 8,
+    gym: card && prepare
+      ? {
+          prepareUrl: prepare.href || prepare.getAttribute('href'),
+          arena: card.querySelector('.gym-card__identity h3, h3')?.textContent?.trim() || 'Arène',
+          champion:
+            card.querySelector('.gym-card__identity p:last-child')?.textContent
+              ?.replace(/^\s*Champion\s*:\s*/i, '')
+              .trim() || null,
+          badge: card.querySelector('.gym-card__identity .card-label, .card-label')?.textContent?.trim() || null,
+          rank: parseNumber(card.querySelector('.gym-rank')?.textContent?.match(/\d+/)?.[0]),
+          teamSize: teamSizeMatch ? Number(teamSizeMatch[1]) : null,
+        }
+      : null,
+  };
+}
+
+async function backgroundObserveExpeditions() {
+  const page = await fetchObservedPage('/expeditions', { cacheMs: 5000 });
+  if (!page) return { acted: false, page: null, active: null };
+
+  const root = page.doc;
+  mergeBackgroundExpeditionAccount(root);
+
+  const active = detachedActiveExpeditionSnapshot(root);
+  if (active) {
+    const dueAt = active.dueAt || expeditionCycle().dueAt || null;
+    const phase = dueAt && dueAt <= now() + 1500 ? 'due' : 'running';
+
+    setExpeditionPhase(phase, {
+      title: active.title,
+      resultUrl: active.resultUrl,
+      dueAt,
+    });
+
+    state.accountSnapshot = {
+      ...accountSnapshot(),
+      expeditions: {
+        ...accountSnapshot().expeditions,
+        phase,
+        activeTitle: active.title,
+        dueAt,
+      },
+    };
+    saveState(state);
+
+    return { acted: false, page, active };
+  }
+
+  setExpeditionPhase('ready_to_start', {
+    title: null,
+    resultUrl: null,
+    dueAt: null,
+  });
+
+  return { acted: false, page, active: null };
+}
+
+function detachedCaptureDecision(root) {
+  const form = root.querySelector('form[data-capture-form]');
+  if (!form) return null;
+
+  const encounter = form.closest('.mission-encounter, section, article') || form;
+  const text = normalizeText(encounter.textContent || '');
+  const species =
+    encounter.querySelector('.mission-encounter__identity h3, h3')?.textContent?.trim() ||
+    'Pokémon rencontré';
+
+  let isNew = null;
+  if (/absente? du pokedex|nouvelle espece|premiere capture|jamais capture|new species/.test(text)) {
+    isNew = true;
+  } else if (/presente? dans le pokedex|deja capture|already caught|already owned/.test(text)) {
+    isNew = false;
+  }
+
+  const rarity =
+    text.match(/\b(commun|peu commun|rare|epique|legendaire|mythique|common|uncommon|epic|legendary|mythic)\b/)?.[1] ||
+    '';
+
+  const ivRaw = text.match(/(?:iv|ivs)[^\d]{0,12}(\d+(?:[.,]\d+)?)/i)?.[1];
+  const ivScore = parseNumber(ivRaw);
+
+  const checked = form.querySelector('input[name="ball_code"]:checked');
+  const label = checked?.closest('label');
+  const selected = form.querySelector('[data-capture-select-value], .capture-select__value');
+  const countText =
+    label?.querySelector('strong')?.textContent ||
+    selected?.querySelector('strong')?.textContent ||
+    '';
+  const countMatch = countText.match(/\d+/);
+  const ballReserve = countMatch ? Number(countMatch[0]) : null;
+
+  const chanceText = form.querySelector('[data-capture-chance], .capture-chance')?.textContent || '';
+  const chanceMatch = chanceText.match(/(\d+(?:[.,]\d+)?)\s*%/);
+  const captureChance = chanceMatch ? parseNumber(chanceMatch[1]) : null;
+
+  const attemptsText = encounter.querySelector('.mission-encounter__attempts')?.textContent || '';
+  const attemptsMatch = attemptsText.match(/(\d+)\s*(?:tentative|tentatives|attempt|attempts)/i);
+  const attemptsRemaining = attemptsMatch ? Number(attemptsMatch[1]) : null;
+
+  let action = 'manual';
+  let reason = 'Capture auto désactivée';
+
+  if (config.autoCapture) {
+    if (
+      ballReserve != null &&
+      ballReserve <= config.minBallReserve
+    ) {
+      action = 'ignore';
+      reason = `Réserve protégée · ${ballReserve}/${config.minBallReserve}`;
+    } else if (!config.smartCapture) {
+      action = 'capture';
+      reason = captureChance != null
+        ? `Capture auto simple · ${captureChance}%`
+        : 'Capture auto simple';
+    } else if (config.captureNewSpecies && isNew === true) {
+      action = 'capture';
+      reason = captureChance != null
+        ? `Nouvelle espèce · ${captureChance}%`
+        : 'Nouvelle espèce';
+    } else if (
+      config.captureRare &&
+      /rare|epique|legendaire|mythique|epic|legendary|mythic/.test(rarity)
+    ) {
+      action = 'capture';
+      reason = `Rareté · ${rarity}`;
+    } else if (
+      ivScore != null &&
+      ivScore >= config.minCaptureIvScore &&
+      ivScore <= 100
+    ) {
+      action = 'capture';
+      reason = `IV ${ivScore} ≥ ${config.minCaptureIvScore}`;
+    } else if (config.captureUnknownEncounters && isNew == null) {
+      action = 'capture';
+      reason = 'Rencontre inconnue autorisée';
+    } else {
+      action = 'ignore';
+      reason = isNew === false
+        ? 'Doublon non prioritaire'
+        : 'Aucun critère intelligent validé';
+    }
+  }
+
+  return {
+    form,
+    species,
+    isNew,
+    rarity,
+    ivScore,
+    ballReserve,
+    captureChance,
+    attemptsRemaining,
+    action,
+    reason,
+  };
+}
+
+function recordDetachedExpeditionOutcome(root, pathname) {
+  if (!pathname || state.lastRecordedResultUrl === pathname) return;
+
+  const text = normalizeText(root.body?.textContent || '');
+  const failure = /echec|echouee|echoue|defaite|failed|failure|lost/.test(text);
+  const success = /reussite|reussie|victoire|success|completed|terminee avec succes/.test(text);
+
+  if (!failure && !success) return;
+
+  const title = normalizeText(
+    root.querySelector('.page-header h1, main h1, main h2')?.textContent ||
+    expeditionCycle().title ||
+    'expedition'
+  );
+
+  const previous = state.expeditionStats?.[title] || {
+    attempts: 0,
+    successes: 0,
+    failures: 0,
+    failureStreak: 0,
+  };
+
+  state.expeditionStats = {
+    ...(state.expeditionStats || {}),
+    [title]: {
+      attempts: previous.attempts + 1,
+      successes: previous.successes + (success && !failure ? 1 : 0),
+      failures: previous.failures + (failure ? 1 : 0),
+      failureStreak: failure ? previous.failureStreak + 1 : 0,
+      lastOutcome: failure ? 'failure' : 'success',
+      lastOutcomeAt: now(),
+    },
+  };
+  state.lastRecordedResultUrl = pathname;
+  saveState(state);
+}
+
+async function backgroundHandleExpeditionResult(active) {
+  if (!active?.resultUrl) return false;
+
+  const page = await fetchObservedPage(active.resultUrl, {
+    cacheMs: 0,
+    force: true,
+  });
+  if (!page) return false;
+
+  recordDetachedExpeditionOutcome(page.doc, page.pathname);
+
+  const capture = detachedCaptureDecision(page.doc);
+  if (capture) {
+    state.captureDecision = {
+      action: capture.action,
+      reason: capture.reason,
+      species: capture.species,
+      isNew: capture.isNew,
+      rarity: capture.rarity,
+      ivScore: capture.ivScore,
+      ballName: null,
+      ballCode: capture.form.querySelector('input[name="ball_code"]:checked')?.value || null,
+      ballReserve: capture.ballReserve,
+      captureChance: capture.captureChance,
+      attemptsRemaining: capture.attemptsRemaining,
+      updatedAt: now(),
+    };
+    saveState(state);
+    updatePanel();
+
+    if (capture.action === 'manual') {
+      setExpeditionPhase('due', {
+        title: active.title,
+        resultUrl: active.resultUrl,
+        dueAt: active.dueAt,
+      });
+      return false;
+    }
+
+    if (capture.action === 'capture') {
+      const submitted = await submitObservedForm(
+        capture.form,
+        `Capture arrière-plan: ${capture.species} — ${capture.reason}`,
+        {
+          expectedKind: 'capture',
+          navigate: false,
+          moduleId: 'expeditions',
+        }
+      );
+
+      if (submitted) return true;
+
+      setExpeditionPhase('due', {
+        title: active.title,
+        resultUrl: active.resultUrl,
+        dueAt: active.dueAt,
+      });
+      return false;
+    }
+  }
+
+  const text = normalizeText(page.doc.body?.textContent || '');
+  const rewardsRecovered =
+    Boolean(page.doc.querySelector('.result-claimed')) ||
+    /recompenses recuperees|recompense recuperee|status badge success.*recuperee/.test(text);
+
+  if (rewardsRecovered) {
+    setExpeditionPhase('ready_to_start', {
+      title: null,
+      resultUrl: null,
+      dueAt: null,
+    });
+    return false;
+  }
+
+  // Contrat serveur inconnu : conserver le fallback visible pour ne pas
+  // inventer une action de récupération.
+  setExpeditionPhase('due', {
+    title: active.title,
+    resultUrl: active.resultUrl,
+    dueAt: active.dueAt,
+  });
+  return false;
+}
+
+async function backgroundStartExpedition(expeditionPage) {
+  if (!config.autoStartExpeditions || !expeditionPage?.doc) return false;
+
+  const ranking = rankExpeditions(expeditionPage.doc);
+  const selected = selectExpeditionFromRanking(ranking);
+  if (!selected?.button) return false;
+
+  const prepareUrl = selected.button.href || selected.button.getAttribute('href');
+  if (!prepareUrl) return false;
+
+  state.selectedExpedition = selected.title;
+  state.selectedExpeditionScore = selected.score;
+  saveState(state);
+
+  const prepare = await fetchObservedPage(prepareUrl, {
+    cacheMs: 0,
+    force: true,
+  });
+  if (!prepare) return false;
+
+  const requirement = expeditionTeamRequirement(prepare.doc);
+  if (!requirement) return false;
+
+  setExpeditionPhase('preparing', {
+    title: selected.title,
+    resultUrl: null,
+    dueAt: null,
+  });
+
+  const assessment = preparationTeamPlan(requirement);
+  if (!assessment.plan.viable) {
+    blockMissionTemporarily(selected.title, assessment.plan.reason);
+    state.lastAction = `Mission écartée en arrière-plan: ${selected.title} — ${assessment.plan.reason}`;
+    saveState(state);
+    updatePanel();
+    return false;
+  }
+
+  const plannedIds = assessment.plan.team.map(pokemon => pokemon.id);
+  if (plannedIds.length < requirement.min) return false;
+
+  setExpeditionPhase('starting', { title: selected.title });
+
+  const submitted = await submitObservedForm(
+    requirement.form,
+    `Lancement arrière-plan: ${selected.title}`,
+    {
+      expectedKind: 'expedition_launch',
+      navigate: false,
+      moduleId: 'expeditions',
+      overrides: {
+        selection_source: 'custom',
+        'pokemon_public_ids[]': plannedIds,
+      },
+    }
+  );
+
+  if (!submitted) {
+    setExpeditionPhase('ready_to_start', {
+      title: null,
+      resultUrl: null,
+      dueAt: null,
+    });
+  }
+
+  return submitted;
+}
+
+async function backgroundHandleLeague() {
+  if (!config.autoGyms) return false;
+
+  const page = await fetchObservedPage('/league', { cacheMs: 6000 });
+  if (!page) return false;
+
+  const info = detachedLeagueInfo(page.doc);
+  mergeBackgroundLeagueAccount(page.doc, info);
+
+  const today = localDayKey();
+  const currentGym = gymCycle();
+
+  if (
+    currentGym.completedDay === today ||
+    currentGym.challengeSubmittedDay === today
+  ) {
+    setGymCycle('done', {
+      checkedDay: today,
+      availableToday: false,
+      badges: info.badges,
+      totalBadges: info.totalBadges,
+      completedDay: today,
+      reason: 'Combat d’arène déjà tenté aujourd’hui',
+    });
+    return false;
+  }
+
+  if (info.dailyAvailable === false) {
+    setGymCycle('done', {
+      checkedDay: today,
+      availableToday: false,
+      badges: info.badges,
+      totalBadges: info.totalBadges,
+      reason: 'Combat du jour déjà utilisé ou indisponible',
+    });
+    return false;
+  }
+
+  if (!info.gym) {
+    setGymCycle('blocked', {
+      checkedDay: today,
+      availableToday: info.dailyAvailable,
+      badges: info.badges,
+      totalBadges: info.totalBadges,
+      reason: info.dailyAvailable === true
+        ? 'Combat disponible, mais aucune arène débloquée'
+        : 'Aucune arène disponible actuellement',
+      blockedUntil: now() + config.gymRetryMinutes * 60 * 1000,
+    });
+    return false;
+  }
+
+  setGymCycle('available', {
+    checkedDay: today,
+    availableToday: true,
+    badges: info.badges,
+    totalBadges: info.totalBadges,
+    arena: info.gym.arena,
+    champion: info.gym.champion,
+    badge: info.gym.badge,
+    requiredTeamSize: info.gym.teamSize,
+    reason: `${info.gym.badge || 'Badge'} · équipe de ${info.gym.teamSize || '?'}`,
+    blockedUntil: 0,
+  });
+
+  const prepare = await fetchObservedPage(info.gym.prepareUrl, {
+    cacheMs: 0,
+    force: true,
+  });
+  if (!prepare) return false;
+
+  const form = prepare.doc.querySelector(
+    'form[data-team-builder][action*="/gyms/"][action$="/challenge"]'
+  );
+  const requirement = teamRequirementFromForm(form);
+  if (!requirement) return false;
+
+  const assessment = gymTeamPlan(requirement);
+  if (!assessment.plan.viable) return false;
+
+  const plannedIds = assessment.plan.team.map(pokemon => pokemon.id);
+  if (plannedIds.length < requirement.min) return false;
+
+  state.gymCycle = {
+    ...gymCycle(),
+    phase: 'challenging',
+    selectedTeam: assessment.plan.team.map(pokemon => pokemon.name),
+    teamScore: assessment.plan.teamScore,
+    reason: `Défi arrière-plan avec ${assessment.plan.team.map(pokemon => pokemon.name).join(', ')}`,
+    lastChallengeAt: now(),
+    challengeSubmittedDay: today,
+  };
+  saveState(state);
+  updatePanel();
+
+  const submitted = await submitObservedForm(
+    form,
+    `Arène arrière-plan: défier ${assessment.context?.champion || assessment.context?.title || 'le Champion'}`,
+    {
+      expectedKind: 'gym_challenge',
+      navigate: false,
+      moduleId: 'progression',
+      overrides: {
+        selection_source: 'custom',
+        'pokemon_public_ids[]': plannedIds,
+      },
+    }
+  );
+
+  if (!submitted) {
+    state.gymCycle = {
+      ...gymCycle(),
+      phase: 'blocked',
+      challengeSubmittedDay: null,
+      reason: httpTransportState().lastError || 'Défi arrière-plan non soumis',
+    };
+    saveState(state);
+    updatePanel();
+  }
+
+  return submitted;
+}
+
+function backgroundEvolutionCandyGoal(evolutions) {
+  if (evolutions.length !== 1) return null;
+
+  const evolution = evolutions[0];
+  const candy = evolution.requirements.find(requirement =>
+    normalizeText(requirement.label).includes('bonbon')
+  );
+  const otherMissing = evolution.requirements.some(requirement =>
+    requirement.missing &&
+    !normalizeText(requirement.label).includes('bonbon')
+  );
+
+  if (!candy || otherMissing || !candy.missing) return null;
+
+  return {
+    target: evolution.target,
+    required: candy.required,
+    available: candy.available,
+  };
+}
+
+async function backgroundHandlePokemonProgression() {
+  if (!config.autoLevelPokemon && !config.autoEvolvePokemon) return false;
+  if (expeditionCycle().phase === 'running') {
+    setPokemonProgression({
+      phase: 'waiting_expedition',
+      action: 'wait',
+      reason: `Attente de la fin de ${expeditionCycle().title || 'l’expédition'} avant d’investir des ressources`,
+    });
+    return false;
+  }
+
+  const collection = await fetchObservedPage('/collection', { cacheMs: 12000 });
+  if (!collection) return false;
+
+  const records = collectionPokemonRecords(collection.doc, collection.url);
+  if (!records.length) return false;
+
+  const progress = pokemonProgressionState();
+  const scanExpired =
+    !progress.scanStartedAt ||
+    now() - progress.scanStartedAt > config.pokemonProgressionScanMinutes * 60 * 1000;
+
+  if (scanExpired) resetPokemonProgressionScan();
+
+  const scanned = new Set(pokemonProgressionState().scannedIds || []);
+  const candidates = pokemonProgressionPriorityRecords(records)
+    .filter(record => !scanned.has(record.id))
+    .slice(0, 3);
+
+  if (!candidates.length) {
+    setPokemonProgression({
+      phase: 'idle',
+      targetId: null,
+      targetName: null,
+      targetLevel: null,
+      action: null,
+      reason: 'Analyse arrière-plan terminée · aucun investissement sûr',
+      scannedIds: [],
+      lastScanAt: now(),
+      blockedUntil: now() + config.pokemonProgressionScanMinutes * 60 * 1000,
+    });
+    return false;
+  }
+
+  for (const target of candidates) {
+    setPokemonProgression({
+      phase: 'opening_profile',
+      targetId: target.id,
+      targetName: target.name,
+      targetLevel: target.level,
+      action: 'inspect',
+      reason: `Inspection arrière-plan de ${target.name}`,
+    });
+
+    const profile = await fetchObservedPage(target.href, {
+      cacheMs: 0,
+      force: true,
+    });
+    if (!profile) continue;
+
+    const context = pokemonProfileContext(profile.doc, profile.url);
+    if (!context) continue;
+
+    if (context.inActivity) {
+      markPokemonScanned(context.id, {
+        phase: 'blocked',
+        targetId: context.id,
+        targetName: context.name,
+        targetLevel: context.level,
+        action: 'skip',
+        reason: `${context.name} participe actuellement à une activité`,
+      });
+      continue;
+    }
+
+    const evolutions = pokemonEvolutionOptions(profile.doc);
+    const affordable = evolutions.filter(option => option.available);
+
+    if (
+      config.autoEvolvePokemon &&
+      evolutions.length === 1 &&
+      affordable.length === 1
+    ) {
+      const evolution = affordable[0];
+      setPokemonProgression({
+        phase: 'evolving',
+        targetId: context.id,
+        targetName: context.name,
+        targetLevel: context.level,
+        action: 'evolve',
+        reason: evolution.reason,
+        lastEvolutionAt: now(),
+      });
+
+      const submitted = await submitObservedForm(
+        evolution.form,
+        `Évolution arrière-plan: ${context.name} → ${evolution.target || 'évolution'}`,
+        {
+          expectedKind: 'pokemon_evolve',
+          navigate: false,
+          moduleId: 'pokemon',
+        }
+      );
+
+      if (submitted) return true;
+      continue;
+    }
+
+    if (config.autoEvolvePokemon && evolutions.length > 1) {
+      markPokemonScanned(context.id, {
+        phase: 'manual',
+        targetId: context.id,
+        targetName: context.name,
+        targetLevel: context.level,
+        action: 'manual_evolution',
+        reason: 'Plusieurs évolutions possibles · choix manuel conservé',
+      });
+      continue;
+    }
+
+    const level = pokemonLevelUpOption(profile.doc);
+    const evolutionCandyGoal = backgroundEvolutionCandyGoal(evolutions);
+    const preserveCandy =
+      config.preserveEvolutionCandies &&
+      evolutionCandyGoal &&
+      Number(level.candy?.required || 0) > 0;
+
+    if (config.autoLevelPokemon && level.available && !preserveCandy) {
+      setPokemonProgression({
+        phase: 'leveling',
+        targetId: context.id,
+        targetName: context.name,
+        targetLevel: level.targetLevel,
+        action: 'level_up',
+        reason: level.reason,
+        lastUpgradeAt: now(),
+      });
+
+      const submitted = await submitObservedForm(
+        level.form,
+        `Renforcement arrière-plan: ${context.name} → niveau ${level.targetLevel}`,
+        {
+          expectedKind: 'pokemon_level_up',
+          navigate: false,
+          moduleId: 'pokemon',
+        }
+      );
+
+      if (submitted) return true;
+      continue;
+    }
+
+    markPokemonScanned(context.id, {
+      phase: 'scanned',
+      targetId: context.id,
+      targetName: context.name,
+      targetLevel: context.level,
+      action: 'none',
+      reason: preserveCandy
+        ? `Bonbons réservés pour ${evolutionCandyGoal.target || 'l’évolution'}`
+        : level.reason || 'Aucune progression sûre disponible',
+    });
+  }
+
+  return false;
+}
+
+async function runBackgroundAutomation() {
+  if (!config.backgroundHttpMode) return false;
+  if (!backgroundSweepDue()) return false;
+
+  backgroundMarkSweep();
+
+  const expeditionObservation = await backgroundObserveExpeditions();
+
+  if (
+    expeditionObservation.active &&
+    expeditionCycle().phase === 'due'
+  ) {
+    const resultAction = await backgroundHandleExpeditionResult(
+      expeditionObservation.active
+    );
+    if (resultAction) return true;
+  }
+
+  const leaguePage = await fetchObservedPage('/league', { cacheMs: 6000 });
+  if (leaguePage) {
+    const info = detachedLeagueInfo(leaguePage.doc);
+    mergeBackgroundLeagueAccount(leaguePage.doc, info);
+  }
+
+  // Recalculer le Goal Planner avec les informations fraîchement récupérées.
+  const plan = refreshGoalPlan(accountSnapshot());
+
+  if (plan.step?.module === 'progression') {
+    const gymAction = await backgroundHandleLeague();
+    if (gymAction) return true;
+
+    const refreshedAfterGym = refreshGoalPlan(accountSnapshot());
+    if (
+      refreshedAfterGym.step?.module === 'healing' ||
+      gymCycle().needsHealing
+    ) {
+      return false;
+    }
+  }
+
+  if (
+    plan.step?.module === 'expeditions' &&
+    !expeditionObservation.active
+  ) {
+    const expeditionAction = await backgroundStartExpedition(expeditionObservation.page);
+    if (expeditionAction) return true;
+  }
+
+  if (plan.step?.module === 'pokemon') {
+    const pokemonAction = await backgroundHandlePokemonProgression();
+    if (pokemonAction) return true;
+  }
+
+  // Entretien opportuniste, sans navigation visible.
+  if (!expeditionObservation.active) {
+    const expeditionAction = await backgroundStartExpedition(expeditionObservation.page);
+    if (expeditionAction) return true;
+  }
+
+  if (leagueNeedsDailyCheck()) {
+    const gymAction = await backgroundHandleLeague();
+    if (gymAction) return true;
+  }
+
+  if (pokemonProgressionScanDue()) {
+    const pokemonAction = await backgroundHandlePokemonProgression();
+    if (pokemonAction) return true;
+  }
+
+  return false;
+}
 
 // ---- src/core/navigation.js ----
 function moduleEnabled(moduleId) {
@@ -4994,6 +6150,33 @@ function moduleEnabled(moduleId) {
     return MODULES
       .filter(module => moduleEnabled(module.id))
       .filter(module => module.id !== current?.id)
+      .filter(module => {
+        if (!config.backgroundHttpMode) return true;
+
+        if (
+          module.id === 'progression' &&
+          backgroundRouteFresh('/league')
+        ) {
+          return false;
+        }
+
+        if (
+          module.id === 'pokemon' &&
+          backgroundRouteFresh('/collection')
+        ) {
+          return false;
+        }
+
+        if (
+          module.id === 'expeditions' &&
+          expeditionCycle().phase !== 'due' &&
+          backgroundRouteFresh('/expeditions')
+        ) {
+          return false;
+        }
+
+        return true;
+      })
       .map(module => {
         const anchor = navLinkForModule(module);
         if (!anchor) return null;
@@ -5085,6 +6268,15 @@ function moduleEnabled(moduleId) {
     const plan = [];
     const expeditionState = expeditionCycle();
     const navigation = navigationCandidates()[0] || null;
+
+    if (config.backgroundHttpMode && backgroundSweepDue()) {
+      plan.push({
+        name: 'background-http',
+        priority: 8850,
+        reason: 'observation GET silencieuse et actions POST directes',
+        run: runBackgroundAutomation,
+      });
+    }
 
     if (recentBotAction() && findClickable(
       ['confirmer', 'confirm', 'oui', 'yes', 'valider'],
@@ -6377,6 +7569,16 @@ GM_addStyle(`
         return;
       }
 
+      if (action === 'background-refresh-dec') {
+        stepCaptureSetting('backgroundRefreshSeconds', -10, 10, 300);
+        return;
+      }
+
+      if (action === 'background-refresh-inc') {
+        stepCaptureSetting('backgroundRefreshSeconds', 10, 10, 300);
+        return;
+      }
+
       if (action === 'ranking') {
         const ranking = rankExpeditions();
         if (!ranking.length) {
@@ -6540,7 +7742,7 @@ GM_addStyle(`
       'autoEvolvePokemon',
       'autoPlant',
     ];
-    const intelligenceKeys = ['smartTeam', 'directHttpActions'];
+    const intelligenceKeys = ['smartTeam', 'directHttpActions', 'backgroundHttpMode'];
     const captureKeys = [
       'autoCapture',
       'smartCapture',
@@ -6576,6 +7778,17 @@ GM_addStyle(`
       .join('');
 
     const transport = httpTransportState();
+    const background = backgroundHttpState();
+    const backgroundLabel = config.backgroundHttpMode
+      ? background.lastUrl
+        ? `GET · ${background.lastStatus ?? '?'}`
+        : 'GET silencieux'
+      : 'Navigation visible';
+    const backgroundTone = background.lastError
+      ? 'danger'
+      : background.lastUrl
+        ? 'ready'
+        : '';
     const transportLabel = config.directHttpActions
       ? transport.lastEndpoint
         ? `HTTP · ${transport.lastStatus ?? '?'}`
@@ -6625,7 +7838,8 @@ GM_addStyle(`
           </div>
           <div class="pta-subtitle">
             ${escapeHtml(current?.label || 'Page PokéTaka')} · ${config.enabled ? 'Pilotage actif' : 'En pause'}
-            · ${config.directHttpActions ? 'HTTP direct' : 'DOM'}
+            · ${config.backgroundHttpMode ? 'GET silencieux' : 'Navigation'}
+            · ${config.directHttpActions ? 'POST direct' : 'DOM'}
             ${GM_info?.script?.version && GM_info.script.version !== VERSION
               ? ` · Loader ${escapeHtml(GM_info.script.version)}`
               : ''}
@@ -6886,6 +8100,22 @@ GM_addStyle(`
               </span>
             </div>
             <div class="pta-module">
+              <span class="pta-mini-dot ${backgroundTone}"></span>
+              <span class="pta-module-name">Observation</span>
+              <span
+                class="pta-module-status"
+                title="${escapeHtml(
+                  background.lastError ||
+                  background.lastUrl ||
+                  (config.backgroundHttpMode
+                    ? 'GET same-origin parsés hors écran'
+                    : 'Navigation visible utilisée pour collecter les informations')
+                )}"
+              >
+                ${escapeHtml(backgroundLabel)} · ${background.gets || 0}
+              </span>
+            </div>
+            <div class="pta-module">
               <span class="pta-mini-dot ${transportTone}"></span>
               <span class="pta-module-name">Transport</span>
               <span
@@ -6974,8 +8204,25 @@ GM_addStyle(`
             </span>
           </summary>
           <div class="pta-settings">
+            <div class="pta-settings-note">
+              <strong>GET silencieux</strong> lit les pages en arrière-plan sans te déplacer.
+              <strong>POST direct</strong> exécute ensuite les formulaires serveur observés.
+            </div>
             ${optionButton('smartTeam', 'Équipe intelligente')}
-            ${optionButton('directHttpActions', 'Requêtes HTTP directes')}
+            ${optionButton('backgroundHttpMode', 'GET silencieux en arrière-plan')}
+            ${optionButton('directHttpActions', 'POST HTTP directs')}
+
+            <div class="pta-stepper">
+              <div class="pta-stepper-label">
+                Rafraîchissement GET
+                <small>Intervalle normal entre deux observations arrière-plan</small>
+              </div>
+              <div class="pta-stepper-value">${config.backgroundRefreshSeconds}s</div>
+              <div class="pta-stepper-controls">
+                <button class="pta-stepper-btn" data-action="background-refresh-dec" title="Rafraîchir plus souvent">−</button>
+                <button class="pta-stepper-btn" data-action="background-refresh-inc" title="Rafraîchir moins souvent">+</button>
+              </div>
+            </div>
           </div>
         </details>
 
