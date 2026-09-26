@@ -2,7 +2,7 @@
 (() => {
   'use strict';
 
-  const VERSION = "0.9.7";
+  const VERSION = "0.9.8";
 
 // ---- src/core/config.js ----
 const STORAGE_KEY = 'poketaka-automation:config';
@@ -43,6 +43,7 @@ const STORAGE_KEY = 'poketaka-automation:config';
     smartCapture: true,
     captureNewSpecies: true,
     captureRare: true,
+    captureOwnedDuplicates: false,
     captureUnknownEncounters: false,
     minCaptureIvScore: 80,
     minBallReserve: 3,
@@ -3899,6 +3900,40 @@ function parseCaptureAttempts(root) {
   return match ? Number(match[1]) : null;
 }
 
+function encounterOwnershipState(root, text = '') {
+  if (!root) return null;
+
+  const normalized = normalizeText(
+    text || root.innerText || root.textContent || ''
+  );
+
+  let isNew =
+    parseOptionalBoolean(root.getAttribute('data-new-species')) ??
+    parseOptionalBoolean(root.getAttribute('data-new'));
+
+  const owned =
+    parseOptionalBoolean(root.getAttribute('data-owned')) ??
+    parseOptionalBoolean(root.getAttribute('data-captured'));
+
+  if (isNew == null && owned != null) isNew = !owned;
+
+  if (
+    isNew == null &&
+    /absente? (?:du|au) pokedex|absent from pokedex|pas dans le pokedex|nouvelle espece|premiere capture|jamais capture|non capture|new species|first capture/.test(normalized)
+  ) {
+    isNew = true;
+  }
+
+  if (
+    isNew == null &&
+    /presente? (?:dans|au) (?:le )?pokedex|deja (?:dans|au) (?:le )?pokedex|deja capturee?|deja possedee?|already caught|already owned|already in (?:the )?pokedex/.test(normalized)
+  ) {
+    isNew = false;
+  }
+
+  return isNew;
+}
+
 function captureContext() {
   const root = resultEncounterRoot();
   if (!root) return null;
@@ -3932,29 +3967,7 @@ function captureContext() {
     root.querySelector('h3')?.textContent?.trim() ||
     'Pokémon rencontré';
 
-  let isNew =
-    parseOptionalBoolean(root.getAttribute('data-new-species')) ??
-    parseOptionalBoolean(root.getAttribute('data-new'));
-
-  const owned =
-    parseOptionalBoolean(root.getAttribute('data-owned')) ??
-    parseOptionalBoolean(root.getAttribute('data-captured'));
-
-  if (isNew == null && owned != null) isNew = !owned;
-
-  if (
-    isNew == null &&
-    /absente? du pokedex|absent from pokedex|nouvelle espece|premiere capture|jamais capture|non capture|new species|first capture/.test(text)
-  ) {
-    isNew = true;
-  }
-
-  if (
-    isNew == null &&
-    /presente? dans le pokedex|deja capture|deja possede|already caught|already owned/.test(text)
-  ) {
-    isNew = false;
-  }
+  const isNew = encounterOwnershipState(root, text);
 
   const rarity =
     normalizeText(root.getAttribute('data-rarity') || '') ||
@@ -3985,7 +3998,7 @@ function captureContext() {
 }
 
 function decideCapture(context) {
-  if (!context?.captureButton) {
+  if (!context?.captureButton && !context?.form) {
     return { action: 'none', reason: 'Aucune capture disponible' };
   }
 
@@ -4013,6 +4026,16 @@ function decideCapture(context) {
       reason: context.captureChance != null
         ? `Capture auto simple · ${context.captureChance}%`
         : 'Capture auto simple',
+    };
+  }
+
+  if (
+    context.isNew === false &&
+    !config.captureOwnedDuplicates
+  ) {
+    return {
+      action: context.skipButton ? 'skip' : 'ignore',
+      reason: 'Déjà possédé · doublons bloqués',
     };
   }
 
@@ -4060,7 +4083,7 @@ function decideCapture(context) {
   return {
     action: context.skipButton ? 'skip' : 'ignore',
     reason: context.isNew === false
-      ? 'Doublon non prioritaire'
+      ? 'Déjà possédé · aucun critère doublon autorisé'
       : 'Aucun critère intelligent validé',
   };
 }
@@ -4093,6 +4116,21 @@ async function captureEncounter() {
 
   const decision = decideCapture(context);
   state.captureDecision = captureDecisionSnapshot(context, decision);
+
+  if (decision.action === 'ignore' || decision.action === 'manual') {
+    appendActionLog(
+      decision.action === 'manual' ? 'warning' : 'info',
+      'capture',
+      `${decision.action === 'manual' ? 'Capture manuelle' : 'Capture ignorée'}: ${context.species}`,
+      {
+        reason: decision.reason,
+        isNew: context.isNew,
+        rarity: context.rarity,
+        ivScore: context.ivScore,
+      }
+    );
+  }
+
   saveState(state);
   updatePanel();
 
@@ -5251,18 +5289,15 @@ function detachedCaptureDecision(root) {
     encounter.querySelector('.mission-encounter__identity h3, h3')?.textContent?.trim() ||
     'Pokémon rencontré';
 
-  let isNew = null;
-  if (/absente? du pokedex|nouvelle espece|premiere capture|jamais capture|new species/.test(text)) {
-    isNew = true;
-  } else if (/presente? dans le pokedex|deja capture|already caught|already owned/.test(text)) {
-    isNew = false;
-  }
-
+  const isNew = encounterOwnershipState(encounter, text);
   const rarity =
-    text.match(/\b(commun|peu commun|rare|epique|legendaire|mythique|common|uncommon|epic|legendary|mythic)\b/)?.[1] ||
-    '';
+    normalizeText(encounter.getAttribute('data-rarity') || '') ||
+    (text.match(/\b(commun|peu commun|rare|epique|legendaire|mythique|common|uncommon|epic|legendary|mythic)\b/)?.[1] || '');
 
-  const ivRaw = text.match(/(?:iv|ivs)[^\d]{0,12}(\d+(?:[.,]\d+)?)/i)?.[1];
+  const ivRaw =
+    encounter.getAttribute('data-iv-total') ||
+    encounter.getAttribute('data-iv-score') ||
+    text.match(/(?:iv|ivs)[^\d]{0,12}(\d+(?:[.,]\d+)?)/i)?.[1];
   const ivScore = parseNumber(ivRaw);
 
   const checked = form.querySelector('input[name="ball_code"]:checked');
@@ -5283,61 +5318,38 @@ function detachedCaptureDecision(root) {
   const attemptsMatch = attemptsText.match(/(\d+)\s*(?:tentative|tentatives|attempt|attempts)/i);
   const attemptsRemaining = attemptsMatch ? Number(attemptsMatch[1]) : null;
 
-  let action = 'manual';
-  let reason = 'Capture auto désactivée';
+  const captureButton = form.querySelector(
+    'button[type="submit"], input[type="submit"]'
+  );
 
-  if (config.autoCapture) {
-    if (
-      ballReserve != null &&
-      ballReserve <= config.minBallReserve
-    ) {
-      action = 'ignore';
-      reason = `Réserve protégée · ${ballReserve}/${config.minBallReserve}`;
-    } else if (!config.smartCapture) {
-      action = 'capture';
-      reason = captureChance != null
-        ? `Capture auto simple · ${captureChance}%`
-        : 'Capture auto simple';
-    } else if (config.captureNewSpecies && isNew === true) {
-      action = 'capture';
-      reason = captureChance != null
-        ? `Nouvelle espèce · ${captureChance}%`
-        : 'Nouvelle espèce';
-    } else if (
-      config.captureRare &&
-      /rare|epique|legendaire|mythique|epic|legendary|mythic/.test(rarity)
-    ) {
-      action = 'capture';
-      reason = `Rareté · ${rarity}`;
-    } else if (
-      ivScore != null &&
-      ivScore >= config.minCaptureIvScore &&
-      ivScore <= 100
-    ) {
-      action = 'capture';
-      reason = `IV ${ivScore} ≥ ${config.minCaptureIvScore}`;
-    } else if (config.captureUnknownEncounters && isNew == null) {
-      action = 'capture';
-      reason = 'Rencontre inconnue autorisée';
-    } else {
-      action = 'ignore';
-      reason = isNew === false
-        ? 'Doublon non prioritaire'
-        : 'Aucun critère intelligent validé';
-    }
-  }
-
-  return {
+  const context = {
+    root: encounter,
     form,
+    captureButton,
+    skipButton: null,
     species,
     isNew,
     rarity,
     ivScore,
+    ballCode: checked?.value || null,
+    ballName:
+      label?.querySelector('span')?.textContent?.trim() ||
+      selected?.querySelector('span')?.textContent?.trim() ||
+      checked?.value ||
+      null,
     ballReserve,
+    ballMultiplierBps: parseNumber(checked?.getAttribute('data-multiplier-bps')),
     captureChance,
     attemptsRemaining,
-    action,
-    reason,
+    text,
+  };
+
+  const decision = decideCapture(context);
+
+  return {
+    ...context,
+    action: decision.action,
+    reason: decision.reason,
   };
 }
 
@@ -5398,13 +5410,28 @@ async function backgroundHandleExpeditionResult(active) {
       isNew: capture.isNew,
       rarity: capture.rarity,
       ivScore: capture.ivScore,
-      ballName: null,
-      ballCode: capture.form.querySelector('input[name="ball_code"]:checked')?.value || null,
+      ballName: capture.ballName || null,
+      ballCode: capture.ballCode || capture.form.querySelector('input[name="ball_code"]:checked')?.value || null,
       ballReserve: capture.ballReserve,
       captureChance: capture.captureChance,
       attemptsRemaining: capture.attemptsRemaining,
       updatedAt: now(),
     };
+
+    if (capture.action === 'ignore' || capture.action === 'manual') {
+      appendActionLog(
+        capture.action === 'manual' ? 'warning' : 'info',
+        'capture',
+        `${capture.action === 'manual' ? 'Capture manuelle' : 'Capture ignorée'}: ${capture.species}`,
+        {
+          reason: capture.reason,
+          isNew: capture.isNew,
+          rarity: capture.rarity,
+          ivScore: capture.ivScore,
+        }
+      );
+    }
+
     saveState(state);
     updatePanel();
 
@@ -8003,7 +8030,9 @@ GM_addStyle(`
   function captureModeLabel() {
     if (!config.autoCapture) return 'Manuel';
     if (!config.smartCapture) return 'Auto simple';
-    return 'Intelligent';
+    return config.captureOwnedDuplicates
+      ? 'Intelligent · doublons autorisés'
+      : 'Intelligent · sans doublons';
   }
 
   function liveCapturePanelState() {
@@ -8332,6 +8361,7 @@ GM_addStyle(`
       'smartCapture',
       'captureNewSpecies',
       'captureRare',
+      'captureOwnedDuplicates',
       'captureUnknownEncounters',
     ];
 
@@ -8872,11 +8902,13 @@ GM_addStyle(`
             <div class="pta-settings-note">
               <strong>Capture auto</strong> autorise le bot à lancer une Ball.
               <strong>Capture intelligente</strong> applique ensuite les critères ci-dessous.
+              Par défaut, un Pokémon explicitement déjà possédé est bloqué avant les critères Rare/IV.
             </div>
             ${optionButton('autoCapture', 'Capture auto')}
             ${optionButton('smartCapture', 'Capture intelligente')}
             ${optionButton('captureNewSpecies', 'Nouvelles espèces')}
             ${optionButton('captureRare', 'Rares')}
+            ${optionButton('captureOwnedDuplicates', 'Autoriser doublons rares / IV')}
             ${optionButton('captureUnknownEncounters', 'Inconnues')}
 
             <div class="pta-stepper">

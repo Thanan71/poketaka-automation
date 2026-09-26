@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PokéTaka Automation
 // @namespace    https://github.com/Thanan71/poketaka-automation
-// @version      0.9.7
+// @version      0.9.8
 // @description  Loader léger pour PokéTaka Automation. Le runtime est chargé depuis GitHub Raw.
 // @author       Thanan71
 // @match        https://poketaka.fr/*
@@ -21,7 +21,7 @@
 (() => {
   'use strict';
 
-  const SCRIPT_VERSION = GM_info?.script?.version || '0.9.7';
+  const SCRIPT_VERSION = GM_info?.script?.version || '0.9.8';
   const RAW_BASE = 'https://raw.githubusercontent.com/Thanan71/poketaka-automation/main';
   const VERSION_URL = `${RAW_BASE}/dist/version.json`;
   const RUNTIME_URL = `${RAW_BASE}/dist/runtime.js`;
