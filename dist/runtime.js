@@ -2,7 +2,7 @@
 (() => {
   'use strict';
 
-  const VERSION = "0.8.3";
+  const VERSION = "0.8.4";
 
 // ---- src/core/config.js ----
 const STORAGE_KEY = 'poketaka-automation:config';
@@ -3273,10 +3273,20 @@ GM_addStyle(`
     const panel = document.getElementById('pta-panel');
     if (!panel) return;
 
+    // updatePanel() reconstruit le contenu régulièrement. Sans conserver ces
+    // valeurs, le navigateur remet le conteneur en haut à chaque rafraîchissement.
+    const previousBody = panel.querySelector('.pta-body');
+    const previousScrollTop = previousBody?.scrollTop || 0;
+    const hadRenderedBody = Boolean(previousBody);
+
     const detailsState = {};
     panel.querySelectorAll('details[data-section]').forEach(details => {
       detailsState[details.dataset.section] = details.open;
     });
+
+    const intelligenceOpen = Object.prototype.hasOwnProperty.call(detailsState, 'intelligence')
+      ? detailsState.intelligence
+      : true;
 
     const current = moduleFromLocation();
     const next = nextDueModule();
@@ -3461,7 +3471,7 @@ GM_addStyle(`
           </div>
         </details>
 
-        <details data-section="intelligence" ${detailsState.intelligence !== false ? 'open' : ''}>
+        <details data-section="intelligence" ${intelligenceOpen ? 'open' : ''}>
           <summary>
             <span class="pta-summary-main">Décisions intelligentes</span>
             <span class="pta-summary-meta">${missionPlan.viability || '—'}</span>
@@ -3552,6 +3562,18 @@ GM_addStyle(`
         </div>
       </div>
     `;
+
+    // Restaurer immédiatement la position de lecture après le remplacement du
+    // DOM. Le premier rendu reste naturellement positionné en haut.
+    if (hadRenderedBody) {
+      const nextBody = panel.querySelector('.pta-body');
+      if (nextBody) {
+        nextBody.scrollTop = Math.min(
+          previousScrollTop,
+          Math.max(0, nextBody.scrollHeight - nextBody.clientHeight)
+        );
+      }
+    }
   }
 
 // ---- src/main.js ----
