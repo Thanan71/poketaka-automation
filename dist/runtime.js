@@ -2,7 +2,7 @@
 (() => {
   'use strict';
 
-  const VERSION = "0.9.12";
+  const VERSION = "0.9.13";
 
 // ---- src/core/config.js ----
 const STORAGE_KEY = 'poketaka-automation:config';
@@ -4754,8 +4754,20 @@ function expeditionPrepareLink(card) {
     const direct = card.querySelector(
       'a[href*="/expeditions/"][href$="/prepare"], a.primary-button[href*="/prepare"], a[href*="/prepare"]'
     );
+    const requiresVisibility =
+      typeof document !== 'undefined' &&
+      card.ownerDocument === document;
 
-    if (direct && isVisible(direct) && !direct.hasAttribute('disabled')) return direct;
+    if (
+      direct &&
+      !direct.hasAttribute('disabled') &&
+      !direct.hasAttribute('aria-disabled') &&
+      (!requiresVisibility || isVisible(direct))
+    ) {
+      return direct;
+    }
+
+    if (!requiresVisibility) return null;
 
     return findClickable([
       'preparer l expedition', 'preparer expedition',
@@ -6050,7 +6062,20 @@ async function backgroundStartExpedition(expeditionPage) {
 
   const ranking = rankExpeditions(expeditionPage.doc);
   const selected = selectExpeditionFromRanking(ranking);
-  if (!selected?.button) return false;
+  if (!selected?.button) {
+    appendActionLog(
+      'warning',
+      'expedition',
+      'Slot libre mais aucune expédition lançable détectée',
+      {
+        availableCards: expeditionPage.doc.querySelectorAll(
+          '.mission-catalog[data-panel="available"] .mission-card, .mission-catalog__grid > .mission-card'
+        ).length,
+        rankingCount: ranking.length,
+      }
+    );
+    return false;
+  }
 
   const prepareUrl = selected.button.href || selected.button.getAttribute('href');
   if (!prepareUrl) return false;
