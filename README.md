@@ -274,7 +274,7 @@ La v0.9 renforce aussi la protection du combat quotidien : dès qu'un défi a é
 
 Le bot peut maintenant renforcer et faire évoluer les Pokémon de manière prudente.
 
-- Il attend la fin d'une expédition active avant d'investir des ressources.
+- Une expédition active, terminée ou prête à être relancée est toujours prioritaire sur la progression Pokémon. Le bot n'investit des ressources qu'après avoir tenté la prochaine expédition, ou si la préparation échoue explicitement faute d'équipe viable.
 - Si un plan d'équipe existe, seuls les Pokémon utiles à ce plan sont considérés.
 - Un renforcement automatique ne gagne qu'un niveau par action.
 - Une réserve de Poussière Étoile est conservée (500 par défaut).
