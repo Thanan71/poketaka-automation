@@ -1307,9 +1307,24 @@ async function runBackgroundAutomation() {
     const resultAction = await backgroundHandleExpeditionResult(
       expeditionObservation.active
     );
-    if (resultAction) return true;
+
+    // Un claim confirmé libère le slot : ne pas quitter le cycle ici.
+    // Recharger immédiatement /expeditions permet de relancer une mission
+    // dans le même passage de l'orchestrateur. Les autres actions de résultat
+    // (capture encore en cours, intervention manuelle, etc.) restent terminales.
+    if (
+      resultAction &&
+      expeditionCycle().phase !== 'ready_to_start'
+    ) {
+      return true;
+    }
 
     if (expeditionCycle().phase === 'ready_to_start') {
+      appendActionLog(
+        'info',
+        'expedition',
+        'Slot libéré après résultat — recherche immédiate d’une nouvelle expédition'
+      );
       expeditionObservation = await backgroundObserveExpeditions({
         force: true,
       });

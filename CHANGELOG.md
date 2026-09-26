@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.9.12 - 2026-09-26
+
+- Correction de la reprise du cycle après récupération réussie des récompenses d'expédition.
+- Après un claim vérifié, le coordinateur ne quitte plus immédiatement : il force un nouveau GET `/expeditions` et peut relancer une mission dans le même cycle.
+- Les actions de résultat encore incomplètes (capture/intervention manuelle) restent terminales et ne déclenchent pas de relance prématurée.
+- Ajout d'un log explicite lorsque le slot est libéré et qu'une nouvelle expédition est recherchée.
+- Le panneau Capture n'affiche plus une rencontre déjà résolue simplement parce que le bloc `.mission-encounter` reste présent dans le bilan.
+- Ajout de tests de non-régression pour la continuité post-claim et le nettoyage de l'UI Capture.
+
 ## 0.9.11 - 2026-09-26
 
 - Nouveau chantier de fiabilisation de l'état interne des expéditions.
