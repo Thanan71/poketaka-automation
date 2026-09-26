@@ -23,9 +23,14 @@ function elementText(el) {
     return UNSAFE_WORDS.some(word => text.includes(word));
   }
 
+  function isBotUiElement(el) {
+    return Boolean(el?.closest?.('#pta-panel'));
+  }
+
   function clickableElements(root = document) {
     return [...root.querySelectorAll('button, a[href], input[type="submit"], input[type="button"], [role="button"]')]
       .filter(isVisible)
+      .filter(el => !isBotUiElement(el))
       .filter(el => !isUnsafe(el));
   }
 
@@ -50,7 +55,7 @@ function elementText(el) {
   }
 
   async function clickElement(el, actionName) {
-    if (!el || !isVisible(el) || isUnsafe(el)) return false;
+    if (!el || !isVisible(el) || isBotUiElement(el) || isUnsafe(el)) return false;
 
     state.lastActionAt = now();
     state.lastBotClickAt = now();
