@@ -183,7 +183,13 @@ function gymProgressionGoal(snapshot) {
 
   if (
     league.dailyBattleAvailable === true &&
-    (!today || gymState.completedDay !== today)
+    (
+      !today ||
+      (
+        gymState.completedDay !== today &&
+        gymState.challengeSubmittedDay !== today
+      )
+    )
   ) {
     const arena = league.arena || 'l’arène disponible';
     const badge = league.badge || 'le prochain badge';
