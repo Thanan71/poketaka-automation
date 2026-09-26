@@ -761,6 +761,32 @@ GM_addStyle(`
       };
     }
 
+    let liveCapture = null;
+    try {
+      liveCapture = isExpeditionResultPage() ? captureContext() : null;
+    } catch {
+      liveCapture = null;
+    }
+
+    if (liveCapture) {
+      const captureDecision = decideCapture(liveCapture);
+      const meta = captureActionMeta(captureDecision.action);
+      const title = captureDecision.action === 'capture'
+        ? `Capturer ${liveCapture.species}`
+        : captureDecision.action === 'manual'
+          ? `Capture manuelle · ${liveCapture.species}`
+          : captureDecision.action === 'skip' || captureDecision.action === 'ignore'
+            ? `Ignorer ${liveCapture.species}`
+            : `Rencontre · ${liveCapture.species}`;
+
+      return {
+        title,
+        reason: captureDecision.reason,
+        tone: meta.tone === 'neutral' ? '' : meta.tone,
+        icon: captureDecision.action === 'capture' ? '◎' : captureDecision.action === 'manual' ? '!' : '→',
+      };
+    }
+
     if (expeditionCycle().phase === 'awaiting_capture') {
       return {
         title: 'Décision de capture requise',
@@ -1311,9 +1337,7 @@ GM_addStyle(`
         <details data-section="capture-settings" ${detailsState['capture-settings'] ? 'open' : ''}>
           <summary>
             <span class="pta-summary-main">Captures</span>
-            <span class="pta-summary-meta">
-              ${enabledOptionCount(captureKeys)}/${captureKeys.length}
-            </span>
+            <span class="pta-summary-meta">${escapeHtml(captureModeLabel())}</span>
           </summary>
           <div class="pta-settings">
             <div class="pta-settings-note">
